@@ -140,7 +140,10 @@ const SKU_RE = /\b(?:sku|item\s*(?:#|no\.?|number)|dpci|tcin|model|artikel(?:num
 const UPC_RE = /\b(?:upc|ean|gtin)\s*[:#]?\s*(\d{12,14})\b/i;
 const NOT_TITLE = /^(qty|quantity|price|each|item|items|total|subtotal|sku|upc|sold by|ships? from|shipped by|seller|status|color|size|style|view|track|details|buy again|write a review|order|return|returns|shipping|tax|delivery|arrives?|estimated|free|menge|preis|anzahl|in stock|preorder)\b/i;
 const IMG_SKIP = /logo|spacer|pixel|tracking|beacon|icon|badge|star|rating|social|facebook|twitter|instagram|youtube|tiktok|apple-?store|google-?play|banner|header|footer|divider|arrow|1x1|blank\.gif/i;
-const STOP_BLOCK = /\b(sub-?total|order\s+total|grand\s+total|ship(ping)?\s+to|shipping\s+address|billing\s+address|payment\s+method|order\s+summary)\b/i;
+const STOP_BLOCK = /\b(sub-?total|order\s+total|grand\s+total|ship(ping)?\s+to|shipping\s+address|billing\s+address|payment\s+method|order\s+summary|order\s*(number|no\.?|#)|tracking\s*(number|#)|bestellnummer)\b/i;
+/** Headline sentences ("We're sorry, your order has been canceled.") are not product names. */
+const SENTENCE = /\b(your|we|we're|we've|has been|have been|thank|sorry|below|click|please)\b.*[.!]$/i;
+const isTitle = (t: string) => (t.match(/[A-Za-zÀ-ÿ]/g) ?? []).length >= 4 && !NOT_TITLE.test(t) && !SENTENCE.test(t) && !/^(?=.*\d)[\dA-Z\s-]{8,}$/.test(t);
 
 function qtyFrom(text: string): number | null {
   const m = text.match(QTY_RE);
@@ -201,16 +204,17 @@ function cleanTitle(t: string): string {
 function titleCandidates(block: HTMLElement): string[] {
   const anchors = block
     .querySelectorAll('a')
+    .filter((a) => !/track|carrier|ups\.com|fedex\.com|usps\.com|dhl\./i.test(a.getAttribute('href') ?? ''))
     .map((a) => a.text.replace(/\s+/g, ' ').trim())
-    .filter((t) => t.length >= 6 && !NOT_TITLE.test(t) && !findMoney(t).length);
+    .filter((t) => t.length >= 6 && isTitle(t) && !findMoney(t).length);
   const strong = block
-    .querySelectorAll('strong, b, h1, h2, h3, h4, [class*=title], [class*=name], [class*=product]')
+    .querySelectorAll('strong, b, h3, h4, [class*=title], [class*=name], [class*=product]')
     .map((e) => e.text.replace(/\s+/g, ' ').trim())
-    .filter((t) => t.length >= 6 && !NOT_TITLE.test(t) && !findMoney(t).length && !QTY_RE.test(t));
+    .filter((t) => t.length >= 6 && isTitle(t) && !findMoney(t).length && !QTY_RE.test(t));
   const segments = htmlToLines(block)
     .flatMap((l) => l.split(' | '))
     .map((s) => s.trim())
-    .filter((t) => t.length >= 6 && !NOT_TITLE.test(t) && !QTY_RE.test(t) && !SKU_RE.test(t) && findMoney(t).length === 0);
+    .filter((t) => t.length >= 6 && isTitle(t) && !QTY_RE.test(t) && !SKU_RE.test(t) && findMoney(t).length === 0);
   return [...anchors, ...strong, ...segments.sort((a, b) => b.length - a.length)];
 }
 
@@ -337,12 +341,12 @@ export function extractItemsFromLines(lines: string[], currency: string): Parsed
     // Title: this line minus the qty marker, else the nearest previous plausible line.
     let title = cleanTitle(l.replace(/(?:(?:US|CA|C)?\$|£|€)\s?\d[\d,.]*/g, ''));
     let j = i - 1;
-    while ((!title || title.length < 6 || NOT_TITLE.test(title)) && j >= 0 && i - j <= 3) {
+    while ((!title || title.length < 6 || !isTitle(title)) && j >= 0 && i - j <= 3) {
       const cand = cleanTitle(lines[j]);
-      if (cand.length >= 6 && !NOT_TITLE.test(cand) && findMoney(cand).length === 0 && !STOP_BLOCK.test(cand)) title = cand;
+      if (cand.length >= 6 && isTitle(cand) && findMoney(cand).length === 0 && !STOP_BLOCK.test(cand)) title = cand;
       j--;
     }
-    if (!title || title.length < 4) continue;
+    if (!title || title.length < 4 || !isTitle(title)) continue;
     const window = [lines[i - 1] ?? '', l, lines[i + 1] ?? ''].join(' ');
     const ctx = [l, lines[i + 1] ?? ''].join(' ');
     const { unit, line } = pricesFrom(findMoney(ctx).length ? ctx : window, qty, currency);

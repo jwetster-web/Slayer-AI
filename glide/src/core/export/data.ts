@@ -3,7 +3,7 @@
 // survived cancellation, money uses the same definitions as Analytics.
 
 import { existsSync, readFileSync } from 'node:fs';
-import { extname, join } from 'node:path';
+import { basename, extname, join } from 'node:path';
 import type { AppSettings, KpiSummary, OrderFilter, ProductCategory, SeriesPoint } from '../../shared/types';
 import { kpis, timeline } from '../analytics/engine';
 import type { Db } from '../db/database';
@@ -95,12 +95,15 @@ export interface RecapOptions {
   logoPath?: string | null;
   dateLabel?: string;
   isSample?: boolean;
+  /** Keep glide-img:// references instead of inlining (for fast in-app previews). */
+  urlImages?: boolean;
 }
 
 export function buildRecapData(db: Db, filter: OrderFilter, settings: AppSettings, opts: RecapOptions): RecapData {
   const w = orderWhere(filter);
   const fx = fxExpr(settings);
   const k = kpis(db, filter, settings);
+  const img = (ref: string | null) => (opts.urlImages ? (ref && (ref.startsWith('glide-img://') || ref.startsWith('data:image/')) ? ref : null) : imageToDataUri(ref, opts.imageDir));
   const retailers = db
     .all<Omit<RecapRetailer, 'name' | 'shortName' | 'color' | 'successRate'>>(
       `SELECT o.retailer_id AS id, COUNT(*) AS orders, SUM(o.cancel_state <> 'full') AS live, SUM(o.cancel_state = 'full') AS canceled,
@@ -122,7 +125,7 @@ export function buildRecapData(db: Db, filter: OrderFilter, settings: AppSetting
        GROUP BY p.id ORDER BY units DESC, p.title LIMIT ?`,
       [...w.params, opts.productLimit ?? 400],
     )
-    .map((p) => ({ ...p, image: imageToDataUri(p.image, opts.imageDir), retailers: p.retailers ? p.retailers.split(',') : [] }));
+    .map((p) => ({ ...p, image: img(p.image), retailers: p.retailers ? p.retailers.split(',') : [] }));
   const leaders = db
     .all<{ memberId: number; name: string; avatar: string | null; netCents: number; orders: number; units: number }>(
       `SELECT m.id AS memberId, COALESCE(m.display_name, m.username) AS name, m.avatar_url AS avatar,
@@ -134,7 +137,7 @@ export function buildRecapData(db: Db, filter: OrderFilter, settings: AppSetting
       ...l,
       rank: i + 1,
       name: opts.maskNames ? maskName(l.name) : l.name,
-      avatar: opts.maskNames ? null : l.avatar && !l.avatar.startsWith('http') ? imageToDataUri(l.avatar, opts.imageDir) : null,
+      avatar: opts.maskNames ? null : l.avatar && !l.avatar.startsWith('http') ? img(l.avatar) : null,
     }));
   const pk = db.get<Record<string, number>>(
     `SELECT COUNT(*) AS packages, SUM(pk.status = 'label_created') AS labelCreated, SUM(pk.status IN ('in_transit','delayed')) AS inTransit,
@@ -164,7 +167,7 @@ export function buildRecapData(db: Db, filter: OrderFilter, settings: AppSetting
     brandName: settings.brandName,
     tagline: settings.brandTagline,
     accent: settings.accentColor,
-    logo: opts.logoPath ? imageToDataUri(opts.logoPath, opts.imageDir) : null,
+    logo: opts.logoPath ? (opts.urlImages ? `glide-img://local/${basename(opts.logoPath)}` : imageToDataUri(opts.logoPath, opts.imageDir)) : null,
     dateLabel: opts.dateLabel ?? rangeLabel,
     rangeLabel,
     isSample: !!opts.isSample,

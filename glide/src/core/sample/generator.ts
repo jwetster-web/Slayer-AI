@@ -118,11 +118,12 @@ function tracking(r: Rng, retailer: RetailerId): { number: string; carrier: Carr
 }
 
 function hashDigits(s: string, n: number): string {
+  // FNV-1a over the whole string, then expand to n digits.
   let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619) >>> 0;
   let out = '';
-  for (let i = 0; out.length < n; i++) {
-    h ^= s.charCodeAt(i % s.length) + i;
-    h = Math.imul(h, 16777619) >>> 0;
+  while (out.length < n) {
+    h = Math.imul(h ^ (h >>> 13), 2246822507) >>> 0;
     out += String(h % 10);
   }
   return out;
@@ -234,7 +235,7 @@ export async function generateSampleWorkspace(db: Db, opts: SampleOptions) {
     while (chosen.size < nItems) chosen.add(r.weighted(SAMPLE_PRODUCTS, (p) => p.weight));
     const fx = currencyFor(retailer) === 'GBP' ? 0.82 : currencyFor(retailer) === 'EUR' ? 0.93 : currencyFor(retailer) === 'CAD' ? 1.37 : 1;
     for (const p of chosen) {
-      items.push({ title: p.title, sku: retailer === 'amazon' ? asin(p.slug) : `${p.slug.slice(0, 18).toUpperCase()}`, upc: ['target', 'walmart', 'bestbuy'].includes(retailer) ? upcFor(p.slug) : undefined, qty: r.weighted([1, 2, 3, 4], (k) => [4, 4, 2, 1][k - 1]), unitCents: Math.round(p.priceCents * fx), imageUrl: sampleImageUrl(p) });
+      items.push({ title: p.title, sku: retailer === 'amazon' ? asin(p.slug) : `${retailer.slice(0, 3).toUpperCase()}-${hashDigits(p.slug, 9)}`, upc: ['target', 'walmart', 'bestbuy'].includes(retailer) ? upcFor(p.slug) : undefined, qty: r.weighted([1, 2, 3, 4], (k) => [4, 4, 2, 1][k - 1]), unitCents: Math.round(p.priceCents * fx), imageUrl: sampleImageUrl(p) });
     }
     const sub = items.reduce((s, i) => s + i.qty * i.unitCents, 0);
     const address = newAddress
@@ -314,7 +315,7 @@ export async function generateSampleWorkspace(db: Db, opts: SampleOptions) {
     cached = await cacheProductImages(db, opts.imageDir, async (url) => {
       const p = url.startsWith(SAMPLE_IMAGE_HOST) ? bySlug.get(url) : undefined;
       return p ? { data: Buffer.from(sampleProductArt(p)), contentType: 'image/svg+xml' } : null;
-    }, 200);
+    }, 200, { retryFailed: true, urlPrefix: SAMPLE_IMAGE_HOST });
   }
   db.run("UPDATE email_accounts SET last_sync_at = ?, status = 'connected', processed_count = (SELECT COUNT(*) FROM source_messages s WHERE s.account_id = email_accounts.id)", [now()]);
   await runAutomations(db, sink.events, settings);

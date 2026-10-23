@@ -1,0 +1,111 @@
+@import 'tailwindcss';
+
+@font-face { font-family: 'Inter'; font-weight: 400; src: url('../../resources/fonts/Inter_400Regular.ttf') format('truetype'); font-display: block; }
+@font-face { font-family: 'Inter'; font-weight: 500; src: url('../../resources/fonts/Inter_500Medium.ttf') format('truetype'); font-display: block; }
+@font-face { font-family: 'Inter'; font-weight: 600; src: url('../../resources/fonts/Inter_600SemiBold.ttf') format('truetype'); font-display: block; }
+@font-face { font-family: 'Inter'; font-weight: 700; src: url('../../resources/fonts/Inter_700Bold.ttf') format('truetype'); font-display: block; }
+@font-face { font-family: 'Inter'; font-weight: 800; src: url('../../resources/fonts/Inter_800ExtraBold.ttf') format('truetype'); font-display: block; }
+@font-face { font-family: 'Space Grotesk'; font-weight: 500; src: url('../../resources/fonts/SpaceGrotesk_500Medium.ttf') format('truetype'); font-display: block; }
+@font-face { font-family: 'Space Grotesk'; font-weight: 600; src: url('../../resources/fonts/SpaceGrotesk_600SemiBold.ttf') format('truetype'); font-display: block; }
+@font-face { font-family: 'Space Grotesk'; font-weight: 700; src: url('../../resources/fonts/SpaceGrotesk_700Bold.ttf') format('truetype'); font-display: block; }
+@font-face { font-family: 'JetBrains Mono'; font-weight: 400; src: url('../../resources/fonts/JetBrainsMono_400Regular.ttf') format('truetype'); font-display: block; }
+@font-face { font-family: 'JetBrains Mono'; font-weight: 700; src: url('../../resources/fonts/JetBrainsMono_700Bold.ttf') format('truetype'); font-display: block; }
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Space Grotesk', 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --color-bg: var(--g-bg);
+  --color-bg2: var(--g-bg2);
+  --color-panel: var(--g-panel);
+  --color-panel2: var(--g-panel2);
+  --color-line: var(--g-line);
+  --color-ink: var(--g-ink);
+  --color-ink2: var(--g-ink2);
+  --color-ink3: var(--g-ink3);
+  --color-accent: var(--g-accent);
+  --color-violet: var(--g-violet);
+  --color-cyan: var(--g-cyan);
+  --color-magenta: var(--g-magenta);
+  --color-good: var(--g-good);
+  --color-warn: var(--g-warn);
+  --color-serious: var(--g-serious);
+  --color-bad: var(--g-bad);
+}
+
+:root, :root[data-theme='dark'] {
+  color-scheme: dark;
+  --g-bg: #05060d;
+  --g-bg2: #0a0d1a;
+  --g-panel: rgba(22, 28, 52, 0.55);
+  --g-panel2: rgba(36, 44, 78, 0.6);
+  --g-line: rgba(140, 160, 255, 0.13);
+  --g-ink: #eef1ff;
+  --g-ink2: #b4bcdc;
+  --g-ink3: #7c86ad;
+  --g-accent: #5b8cff;
+  --g-violet: #8b5cf6;
+  --g-cyan: #22d3ee;
+  --g-magenta: #e879f9;
+  --g-good: #34d399;
+  --g-warn: #fbbf24;
+  --g-serious: #fb923c;
+  --g-bad: #fb7185;
+  --g-chart-surface: #0d1120;
+  --g-grid: rgba(160, 175, 255, 0.08);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --g-bg: #f4f6fc;
+  --g-bg2: #e9edf8;
+  --g-panel: rgba(255, 255, 255, 0.82);
+  --g-panel2: rgba(240, 243, 252, 0.95);
+  --g-line: rgba(40, 60, 140, 0.12);
+  --g-ink: #0e1330;
+  --g-ink2: #424a6e;
+  --g-ink3: #6b7396;
+  --g-accent: #3b6df0;
+  --g-violet: #6d4ae0;
+  --g-cyan: #0891b2;
+  --g-magenta: #c026d3;
+  --g-good: #059669;
+  --g-warn: #b7791f;
+  --g-serious: #c2410c;
+  --g-bad: #e11d48;
+  --g-chart-surface: #ffffff;
+  --g-grid: rgba(30, 40, 90, 0.08);
+}
+
+html, body, #root { height: 100%; }
+body { margin: 0; background: var(--g-bg); color: var(--g-ink); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; overflow: hidden; }
+* { scrollbar-width: thin; scrollbar-color: rgba(140, 160, 255, 0.25) transparent; }
+::selection { background: color-mix(in srgb, var(--g-accent) 40%, transparent); }
+
+.glass {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--g-panel) 100%, transparent), color-mix(in srgb, var(--g-panel) 70%, transparent));
+  border: 1px solid var(--g-line);
+  backdrop-filter: blur(18px) saturate(140%);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 20px 40px -24px rgba(0, 0, 0, 0.6);
+}
+:root[data-theme='light'] .glass { box-shadow: 0 1px 0 rgba(255,255,255,.7) inset, 0 12px 30px -18px rgba(30, 40, 90, 0.25); }
+.glow-text { text-shadow: 0 0 24px color-mix(in srgb, var(--g-accent) 55%, transparent); }
+.grad-text { background: linear-gradient(90deg, #ffffff, #a6c1ff 45%, #d8a7ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+:root[data-theme='light'] .grad-text { background: linear-gradient(90deg, #0e1330, #3b6df0 50%, #8b3bd6); -webkit-background-clip: text; background-clip: text; }
+.edge-glow { position: relative; }
+.edge-glow::before { content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px; background: linear-gradient(135deg, rgba(120,150,255,.45), transparent 40%, rgba(232,121,249,.35)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; }
+.focus-ring:focus-visible { outline: 2px solid var(--g-accent); outline-offset: 2px; }
+.tabular { font-variant-numeric: tabular-nums; }
+.drag-region { -webkit-app-region: drag; }
+.no-drag { -webkit-app-region: no-drag; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+:root[data-motion='off'] *, :root[data-motion='off'] *::before, :root[data-motion='off'] *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+
+@keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+.skeleton { background: linear-gradient(90deg, rgba(255,255,255,.04), rgba(255,255,255,.09), rgba(255,255,255,.04)); background-size: 800px 100%; animation: shimmer 1.4s linear infinite; border-radius: 10px; }
+@keyframes pulse-dot { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.8); } }
+.pulse-dot { animation: pulse-dot 1.6s ease-in-out infinite; }
+@keyframes scan { 0% { transform: translateY(-100%); } 100% { transform: translateY(100%); } }

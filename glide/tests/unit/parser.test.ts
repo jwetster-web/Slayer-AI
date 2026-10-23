@@ -117,6 +117,21 @@ describe('retailer email parsing', () => {
     }
   });
 
+  it('never mistakes tracking numbers or headlines for products in single-item emails', async () => {
+    const retailers: RetailerId[] = ['target', 'walmart', 'pokemoncenter_us', 'amazon', 'costco'];
+    for (const r of retailers) {
+      const one = base(r, { items: [{ title: 'POKEMON TCG MEGA EVOLUTION ELITE TRAINER BOX', qty: 1, unitCents: 4999, imageUrl: 'https://img.test/x.png' }] });
+      for (const type of ['shipping', 'cancellation', 'delivery', 'partial_cancellation'] as const) {
+        const spec = { ...one, type, tracking: [{ number: '1Z999AA10123456784', carrier: 'ups' as const }], items: one.items.map((i) => ({ ...i, canceled: type === 'partial_cancellation' })) };
+        const out = await parse(renderSampleEmail(spec).raw);
+        expect(out.status, `${r} ${type}`).toBe('parsed');
+        if (out.status === 'parsed') {
+          expect(out.result.items.map((i) => i.title), `${r} ${type}`).toEqual(['POKEMON TCG MEGA EVOLUTION ELITE TRAINER BOX']);
+        }
+      }
+    }
+  });
+
   it('ignores non-retail email', async () => {
     const raw = 'From: friend@example.com\r\nTo: me@example.com\r\nSubject: lunch?\r\nDate: Mon, 20 Oct 2026 12:00:00 +0000\r\n\r\nWant to grab lunch? Order number 12345 lol';
     const out = await parse(raw);

@@ -26,6 +26,8 @@ export const httpImageFetcher: ImageFetcher = async (url) => {
     return m ? { data: Buffer.from(m[2], 'base64'), contentType: m[1].toLowerCase() } : null;
   }
   if (!/^https:\/\//i.test(url)) return null;
+  // Reserved/non-routable TLDs (sample data, tests) are never fetched.
+  if (/^https:\/\/[^/]+\.(invalid|test|local|example)(\/|$)/i.test(url)) return null;
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 15000);
   try {
@@ -46,11 +48,11 @@ export const httpImageFetcher: ImageFetcher = async (url) => {
 };
 
 /** Downloads up to `limit` uncached product images. Returns how many were cached. */
-export async function cacheProductImages(db: Db, dir: string, fetcher: ImageFetcher = httpImageFetcher, limit = 50): Promise<number> {
+export async function cacheProductImages(db: Db, dir: string, fetcher: ImageFetcher = httpImageFetcher, limit = 50, opts: { retryFailed?: boolean; urlPrefix?: string } = {}): Promise<number> {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const rows = db.all<{ id: number; url: string }>(
-    "SELECT id, url FROM product_images WHERE local_path IS NULL AND url IS NOT NULL AND (sha256 IS NULL OR sha256 <> 'failed') ORDER BY id LIMIT ?",
-    [limit],
+    `SELECT id, url FROM product_images WHERE local_path IS NULL AND url IS NOT NULL ${opts.retryFailed ? '' : "AND (sha256 IS NULL OR sha256 <> 'failed')"} ${opts.urlPrefix ? 'AND url LIKE ?' : ''} ORDER BY id LIMIT ?`,
+    opts.urlPrefix ? [`${opts.urlPrefix}%`, limit] : [limit],
   );
   let n = 0;
   for (const r of rows) {
