@@ -10,6 +10,7 @@ import { buildMime } from './mime';
 export interface SampleItem {
   title: string;
   sku?: string;
+  upc?: string;
   qty: number;
   unitCents: number;
   imageUrl?: string;
@@ -154,7 +155,7 @@ function itemsRowStyle(s: SampleEmailSpec, showPrice: boolean): string {
     .map(
       (i) => `<tr>
   <td width="90"><img src="${i.imageUrl ?? ''}" width="80" height="80" alt="${esc(i.title)}"></td>
-  <td><a href="https://www.example-retailer.test/p/${i.sku ?? 'item'}">${esc(i.title)}</a><br>${i.sku ? `Item #: ${i.sku}<br>` : ''}Qty: ${i.qty}${i.canceled ? '<br><b>Canceled</b>' : ''}</td>
+  <td><a href="https://www.example-retailer.test/p/${i.sku ?? 'item'}">${esc(i.title)}</a><br>${i.sku ? `Item #: ${i.sku}<br>` : ''}${i.upc ? `UPC: ${i.upc}<br>` : ''}Qty: ${i.qty}${i.canceled ? '<br><b>Canceled</b>' : ''}</td>
   <td align="right">${showPrice ? `${money(i.unitCents, s.retailer)} / ea<br>${money(i.unitCents * i.qty, s.retailer)}` : ''}</td>
 </tr>`,
     )
@@ -168,7 +169,7 @@ function itemsCardStyle(s: SampleEmailSpec, showPrice: boolean): string {
       (i) => `<div class="item-card" style="display:flex;padding:12px;border-bottom:1px solid #eee">
   <div><img src="${i.imageUrl ?? ''}" width="96" height="96"></div>
   <div style="padding-left:12px"><div class="product-name">${esc(i.title)}</div>
-  <div>Quantity: ${i.qty}</div>${showPrice ? `<div>${money(i.unitCents * i.qty, s.retailer)}</div>` : ''}${i.canceled ? '<div>Status: Canceled</div>' : ''}</div>
+  ${i.upc ? `<div>UPC: ${i.upc}</div>` : ''}<div>Quantity: ${i.qty}</div>${showPrice ? `<div>${money(i.unitCents * i.qty, s.retailer)}</div>` : ''}${i.canceled ? '<div>Status: Canceled</div>' : ''}</div>
 </div>`,
     )
     .join('');

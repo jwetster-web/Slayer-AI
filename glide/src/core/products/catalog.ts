@@ -106,4 +106,6 @@ export function recordPrice(db: Db, productId: number, retailerId: string, cents
 }
 
 /** Image URL used by the UI: local cached file when available, else the remote URL. */
-export const PRODUCT_IMAGE_SQL = `(SELECT COALESCE(CASE WHEN pi.local_path IS NOT NULL THEN 'glide-img://local/' || pi.local_path END, pi.url) FROM product_images pi WHERE pi.id = p.primary_image_id)`;
+export const productImageSql = (alias = 'p') =>
+  `(SELECT COALESCE(CASE WHEN pi.local_path IS NOT NULL THEN 'glide-img://local/' || pi.local_path END, pi.url) FROM product_images pi WHERE pi.id = ${alias}.primary_image_id)`;
+export const PRODUCT_IMAGE_SQL = productImageSql('p');

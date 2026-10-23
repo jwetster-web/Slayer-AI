@@ -141,7 +141,7 @@ export async function processRawMessage(deps: ProcessDeps, raw: Buffer, ref: Mes
 export function readRawMessage(db: Db, sourceMessageId: number, cipher?: DataCipher | null): Buffer | null {
   const b = db.get<{ encrypted: number; data: Uint8Array }>('SELECT encrypted, data FROM source_message_blobs WHERE message_id = ?', [sourceMessageId]);
   if (!b) return null;
-  let buf = Buffer.from(b.data);
+  let buf: Buffer = Buffer.from(b.data);
   if (b.encrypted) {
     if (!cipher) return null;
     buf = cipher.decrypt(buf);

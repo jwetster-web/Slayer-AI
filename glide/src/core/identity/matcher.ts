@@ -112,7 +112,7 @@ export function gatherCandidates(db: Db, o: OrderFacts): Candidate[] {
       const street = db.value<string>('SELECT street_key FROM addresses WHERE id = ?', [o.shipping_address_id]);
       const neighbours = db.all<{ member_id: number }>(
         "SELECT DISTINCT ao.member_id FROM addresses a JOIN address_owners ao ON ao.address_id = a.id WHERE a.street_key = ? AND a.id <> ? AND ao.status = 'verified'",
-        [street, o.shipping_address_id],
+        [street ?? '', o.shipping_address_id],
       );
       if (neighbours.length === 1) add(live(neighbours[0].member_id)!, 'street', 'Same building as a verified address (different unit)', WEIGHTS.streetExclusive);
     }

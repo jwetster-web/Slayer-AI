@@ -3,7 +3,11 @@
     "target": "ES2023",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "jsx": "react-jsx",
     "strict": true,
     "noUncheckedIndexedAccess": false,
@@ -13,9 +17,17 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "allowImportingTsExtensions": false,
-    "types": ["node"],
-    "baseUrl": ".",
-    "paths": { "@shared/*": ["src/shared/*"], "@core/*": ["src/core/*"] }
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src", "electron", "tests", "scripts/*.ts", "vite.config.ts", "vitest.config.ts", "playwright.config.ts"]
+  "include": [
+    "src",
+    "electron",
+    "tests",
+    "scripts/*.ts",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "playwright.config.ts"
+  ]
 }
