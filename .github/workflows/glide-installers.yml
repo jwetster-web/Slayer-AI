@@ -1,0 +1,60 @@
+name: GLIDE installers
+
+on:
+  push:
+    branches: [glide-order-command-center, main, master]
+    paths: ['glide/**', '.github/workflows/glide-installers.yml']
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: glide } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: glide/package-lock.json }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: --win
+            artifact: GLIDE-Windows-Installer
+            files: glide/release/*.exe
+          - os: macos-latest
+            target: --mac --arm64
+            artifact: GLIDE-macOS-AppleSilicon
+            files: glide/release/*.dmg
+          - os: macos-13
+            target: --mac --x64
+            artifact: GLIDE-macOS-Intel
+            files: glide/release/*.dmg
+          - os: ubuntu-latest
+            target: --linux
+            artifact: GLIDE-Linux-AppImage
+            files: glide/release/*.AppImage
+    runs-on: ${{ matrix.os }}
+    defaults: { run: { working-directory: glide } }
+    env:
+      # Unsigned builds: no Apple/Windows signing certificates are configured.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: glide/package-lock.json }
+      - run: npm ci
+      - run: npm run build
+      - run: npx electron-builder ${{ matrix.target }} --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+          retention-days: 30
