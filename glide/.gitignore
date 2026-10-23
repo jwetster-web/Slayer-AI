@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dist-electron/
+release/
+test-results/
+playwright-report/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.glide-data/
