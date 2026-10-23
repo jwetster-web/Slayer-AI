@@ -8,7 +8,7 @@ import type { AppSettings, KpiSummary, OrderFilter, ProductCategory, SeriesPoint
 import { kpis, timeline } from '../analytics/engine';
 import type { Db } from '../db/database';
 import { maskName } from '../identity/normalize';
-import { productImageSql } from '../products/catalog';
+import { productImageSql, titleKey } from '../products/catalog';
 import { fxExpr, orderWhere } from '../queries/filters';
 import { retailer as retailerMeta } from '../retailers/registry';
 
@@ -116,7 +116,7 @@ export function buildRecapData(db: Db, filter: OrderFilter, settings: AppSetting
       const m = retailerMeta(r.id);
       return { ...r, name: m.name, shortName: m.shortName, color: m.color, successRate: r.orders ? r.live / r.orders : 0 };
     });
-  const products = db
+  const rawProducts = db
     .all<{ id: number; title: string; category: ProductCategory; units: number; orders: number; image: string | null; retailers: string | null }>(
       `SELECT p.id, p.title, p.category, SUM(oi.quantity - oi.canceled_qty) AS units, COUNT(DISTINCT o.id) AS orders,
          COALESCE(${productImageSql('p')}, MAX(oi.image_url)) AS image, GROUP_CONCAT(DISTINCT o.retailer_id) AS retailers
@@ -126,6 +126,22 @@ export function buildRecapData(db: Db, filter: OrderFilter, settings: AppSetting
       [...w.params, opts.productLimit ?? 400],
     )
     .map((p) => ({ ...p, image: img(p.image), retailers: p.retailers ? p.retailers.split(',') : [] }));
+  // The same item bought at different retailers (without a shared UPC) is two catalog
+  // entries. Recaps combine entries whose normalized titles are identical — exact
+  // matches only, never "similar" titles — keeping the best-selling entry's image.
+  const grouped = new Map<string, RecapProduct>();
+  for (const p of rawProducts) {
+    const k = titleKey(p.title);
+    const g = grouped.get(k);
+    if (!g) grouped.set(k, { ...p });
+    else {
+      g.units += p.units;
+      g.orders += p.orders;
+      g.retailers = [...new Set([...g.retailers, ...p.retailers])];
+      if (!g.image && p.image) g.image = p.image;
+    }
+  }
+  const products = [...grouped.values()].sort((a, b) => b.units - a.units || a.title.localeCompare(b.title));
   const leaders = db
     .all<{ memberId: number; name: string; avatar: string | null; netCents: number; orders: number; units: number }>(
       `SELECT m.id AS memberId, COALESCE(m.display_name, m.username) AS name, m.avatar_url AS avatar,

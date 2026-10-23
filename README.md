@@ -1,3 +1,12 @@
+# Slayer-AI
+
+This repository contains two PokeSlayerz tools:
+
+- **[GLIDE — Order Command Center](glide/README.md)**: a desktop app (Electron + SQLite) that tracks retail orders across inboxes, matches them to Discord members, follows shipments, reports analytics and renders Cook Export recap graphics. Start with `cd glide && npm install && npm start`.
+- **SlayerBot** (below): a locked-down local-model Discord bot for answering drop questions.
+
+---
+
 # SlayerBot
 
 A 24/7 Discord bot for the **PokeSlayerz** server. It answers questions about
