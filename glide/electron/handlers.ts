@@ -97,13 +97,13 @@ export function createHandlers(ctx: HandlerContext) {
     'workspace.current': () => (ctx.ws.current ? { ...ctx.ws.current.info, setupComplete: getMeta(db(), 'setup_complete') === '1' } : null),
     'workspace.create': async (name: string, sample: boolean, sampleOrders = 1000) => {
       const info = ctx.ws.create(name || (sample ? 'Sample Workspace' : 'PokeSlayerz'), sample);
-      ctx.ws.open(info.id);
+      await ctx.ws.open(info.id);
       await ctx.restartWorker();
       if (sample) await ctx.runJob({ type: 'generateSample', orders: sampleOrders });
       return ctx.ws.current!.info;
     },
     'workspace.open': async (id: string) => {
-      ctx.ws.open(id);
+      await ctx.ws.open(id);
       await ctx.restartWorker();
       return ctx.ws.current!.info;
     },
@@ -558,7 +558,7 @@ export function createHandlers(ctx: HandlerContext) {
       ctx.ws.close();
       for (const suffix of ['-wal', '-shm']) rmSync(dbPath + suffix, { force: true });
       copyFileSync(backupPath, dbPath);
-      ctx.ws.open(id);
+      await ctx.ws.open(id);
       await ctx.restartWorker();
       audit(db(), ACTOR, 'restored_backup', 'workspace', id, { file: basename(backupPath) });
       return true;

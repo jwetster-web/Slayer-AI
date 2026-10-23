@@ -25,10 +25,11 @@ class SafeStorageProtector implements KeyProtector {
   readonly name = 'safeStorage';
   readonly secure = true;
   protect(p: Buffer) {
-    return safeStorage.encryptString(p.toString('base64'));
+    return safeStorage.encryptStringAsync(p.toString('base64'));
   }
-  unprotect(s: Buffer) {
-    return Buffer.from(safeStorage.decryptString(s), 'base64');
+  async unprotect(s: Buffer) {
+    const r = await safeStorage.decryptStringAsync(s);
+    return { plain: Buffer.from(r.result, 'base64'), reseal: r.shouldReEncrypt };
   }
 }
 
@@ -36,11 +37,11 @@ class SafeStorageProtector implements KeyProtector {
 class FallbackProtector implements KeyProtector {
   readonly name = 'fallback';
   readonly secure = false;
-  protect(p: Buffer) {
+  async protect(p: Buffer) {
     return Buffer.from(p);
   }
-  unprotect(s: Buffer) {
-    return Buffer.from(s);
+  async unprotect(s: Buffer) {
+    return { plain: Buffer.from(s), reseal: false };
   }
 }
 
@@ -211,7 +212,7 @@ function createWindow() {
 app.whenReady().then(async () => {
   const userData = app.getPath('userData');
   mkdirSync(userData, { recursive: true });
-  const protector: KeyProtector = safeStorage.isEncryptionAvailable() ? new SafeStorageProtector() : new FallbackProtector();
+  const protector: KeyProtector = (await safeStorage.isAsyncEncryptionAvailable()) ? new SafeStorageProtector() : new FallbackProtector();
   if (!protector.secure) log('warn', 'OS credential storage unavailable — workspace keys are stored unprotected on this machine');
   ws = new WorkspaceManager(userData, protector);
 
@@ -250,7 +251,7 @@ app.whenReady().then(async () => {
   });
 
   try {
-    ws.openLast();
+    await ws.openLast();
     await startWorker();
   } catch (e) {
     log('error', `could not open last workspace: ${(e as Error).message}`);

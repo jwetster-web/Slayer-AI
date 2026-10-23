@@ -10,18 +10,19 @@ import { now, type Db } from './db/database';
 export interface KeyProtector {
   readonly name: string;
   readonly secure: boolean;
-  protect(plain: Buffer): Buffer;
-  unprotect(sealed: Buffer): Buffer;
+  protect(plain: Buffer): Promise<Buffer>;
+  /** Returns the key and whether the OS asks for it to be re-sealed (e.g. key rotation). */
+  unprotect(sealed: Buffer): Promise<{ plain: Buffer; reseal: boolean }>;
 }
 
 export class InsecureTestProtector implements KeyProtector {
   readonly name = 'test-plain';
   readonly secure = false;
-  protect(p: Buffer) {
+  async protect(p: Buffer) {
     return Buffer.from(p);
   }
-  unprotect(s: Buffer) {
-    return Buffer.from(s);
+  async unprotect(s: Buffer) {
+    return { plain: Buffer.from(s), reseal: false };
   }
 }
 
@@ -47,16 +48,18 @@ export class DataCipher {
 }
 
 /** Loads (or creates) the workspace data key, sealed by the OS key protector. */
-export function loadWorkspaceKey(path: string, protector: KeyProtector): Buffer {
+export async function loadWorkspaceKey(path: string, protector: KeyProtector): Promise<Buffer> {
   if (existsSync(path)) {
     const raw = readFileSync(path);
     const [scheme, b64] = raw.toString('utf8').split(':');
     const sealed = Buffer.from(b64 ?? '', 'base64');
     if (scheme !== protector.name) throw new Error(`workspace key was sealed with ${scheme}, current protector is ${protector.name}`);
-    return protector.unprotect(sealed);
+    const { plain, reseal } = await protector.unprotect(sealed);
+    if (reseal) writeFileSync(path, `${protector.name}:${(await protector.protect(plain)).toString('base64')}`, { mode: 0o600 });
+    return plain;
   }
   const key = randomBytes(32);
-  writeFileSync(path, `${protector.name}:${protector.protect(key).toString('base64')}`, { mode: 0o600 });
+  writeFileSync(path, `${protector.name}:${(await protector.protect(key)).toString('base64')}`, { mode: 0o600 });
   return key;
 }
 

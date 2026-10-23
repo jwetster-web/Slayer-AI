@@ -88,8 +88,8 @@ export function gatherCandidates(db: Db, o: OrderFacts): Candidate[] {
     const domain = emailDomain(email);
     if (domain && !isPublicEmailDomain(domain)) {
       const owners = db.all<{ member_id: number; n: number }>(
-        "SELECT member_id, COUNT(*) AS n FROM emails WHERE address LIKE ? AND status = 'verified' AND member_id IS NOT NULL GROUP BY member_id",
-        ['%@' + domain],
+        "SELECT member_id, COUNT(*) AS n FROM emails WHERE substr(address, instr(address, '@') + 1) = ? AND status = 'verified' AND member_id IS NOT NULL GROUP BY member_id",
+        [domain],
       );
       if (owners.length === 1 && owners[0].n >= 2) add(live(owners[0].member_id)!, 'catchall_domain', `Private domain @${domain} is used only by this member`, WEIGHTS.catchAllDomain);
     }

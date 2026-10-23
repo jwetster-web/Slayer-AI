@@ -72,7 +72,7 @@ export class WorkspaceManager {
     return this.info(id, name, isSample, createdAt);
   }
 
-  open(id: string): OpenWorkspace {
+  async open(id: string): Promise<OpenWorkspace> {
     const r = this.read();
     const w = r.workspaces.find((x) => x.id === id);
     if (!w) throw new Error('workspace not found');
@@ -81,7 +81,7 @@ export class WorkspaceManager {
     for (const sub of ['', 'images', 'exports', 'backups']) mkdirSync(join(dir, sub), { recursive: true });
     const dbPath = join(dir, 'glide.sqlite');
     const db = openWorkspaceDb(dbPath, { name: w.name, isSample: w.isSample });
-    const key = loadWorkspaceKey(join(dir, 'key.bin'), this.protector);
+    const key = await loadWorkspaceKey(join(dir, 'key.bin'), this.protector);
     const cipher = new DataCipher(key);
     this.current = {
       info: { id, name: w.name, path: dir, isSample: w.isSample, createdAt: w.createdAt, setupComplete: getMeta(db, 'setup_complete') === '1' },
@@ -100,7 +100,7 @@ export class WorkspaceManager {
     return this.current;
   }
 
-  openLast(): OpenWorkspace | null {
+  async openLast(): Promise<OpenWorkspace | null> {
     const r = this.read();
     if (r.current && r.workspaces.some((w) => w.id === r.current)) return this.open(r.current);
     return null;

@@ -77,6 +77,7 @@ CREATE TABLE emails (
 );
 CREATE INDEX idx_emails_member ON emails(member_id);
 CREATE INDEX idx_emails_base ON emails(base_address);
+CREATE INDEX idx_emails_domain ON emails(substr(address, instr(address, '@') + 1));
 
 CREATE TABLE addresses (
   id INTEGER PRIMARY KEY,
