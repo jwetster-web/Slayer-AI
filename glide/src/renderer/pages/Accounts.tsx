@@ -1,9 +1,9 @@
 import { motion } from 'motion/react';
-import { FileUp, Inbox, KeyRound, Link2, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { FileUp, Inbox, KeyRound, Link2, Plus, RefreshCw, ScanSearch, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { formatNumber, relativeTime } from '../../shared/format';
 import type { EmailAccountRow } from '../../shared/types';
-import { call } from '../lib/api';
+import { call, type ApiResult } from '../lib/api';
 import { useAction, useQuery } from '../lib/hooks';
 import { useStore } from '../lib/store';
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Tabs, Toggle } from '../components/ui';
@@ -28,6 +28,7 @@ export function Accounts() {
   const { data: accounts, refetch } = useQuery(() => call('accounts.list'), []);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<EmailAccountRow | null>(null);
+  const [coverage, setCoverage] = useState<EmailAccountRow | null>(null);
   const act = useAction();
   const importFiles = async (directory: boolean) => {
     const paths = await call('dialog.openFiles', directory ? { directory: true } : { multi: true, filters: [{ name: 'Email', extensions: ['eml', 'mbox'] }] });
@@ -76,6 +77,7 @@ export function Accounts() {
               <div className="mt-3 flex flex-wrap gap-2">
                 {a.kind !== 'import' && <Button size="sm" icon={<RefreshCw className="size-3.5" />} onClick={() => act(() => call('accounts.syncNow', a.id), 'Synced')}>Sync now</Button>}
                 {(a.kind === 'gmail' || a.kind === 'outlook') && <Button size="sm" icon={<Link2 className="size-3.5" />} onClick={() => act(async () => { await call('accounts.oauthConnect', a.id); refetch(); }, 'Connected')}>{a.status === 'needs_auth' ? 'Connect' : 'Reconnect'}</Button>}
+                {a.kind !== 'import' && <Button size="sm" icon={<ScanSearch className="size-3.5" />} onClick={() => setCoverage(a)}>Coverage check</Button>}
                 {a.kind === 'imap' && <Button size="sm" icon={<KeyRound className="size-3.5" />} onClick={() => setEditing(a)}>Edit</Button>}
                 <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" />} onClick={() => act(async () => { await call('accounts.remove', a.id); refetch(); }, 'Removed')}>Remove</Button>
               </div>
@@ -85,6 +87,7 @@ export function Accounts() {
       )}
       <AddAccount open={adding} onClose={() => { setAdding(false); refetch(); }} />
       <EditAccount account={editing} onClose={() => { setEditing(null); refetch(); }} />
+      <Coverage account={coverage} onClose={() => { setCoverage(null); refetch(); }} />
     </div>
   );
 }
@@ -175,3 +178,76 @@ function EditAccount({ account, onClose }: { account: EmailAccountRow | null; on
 }
 
 export { Select };
+
+const STATE_TONE: Record<string, 'good' | 'warn' | 'bad' | 'neutral' | 'accent'> = { parsed: 'good', failed: 'bad', ignored: 'warn', skipped: 'bad', pending: 'accent', outside: 'warn' };
+
+function Coverage({ account, onClose }: { account: EmailAccountRow | null; onClose: () => void }) {
+  const [days, setDays] = useState('30');
+  const [report, setReport] = useState<ApiResult<'accounts.coverage'> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const act = useAction();
+  useEffect(() => setReport(null), [account]);
+  const run = async () => {
+    setBusy(true);
+    setReport((await act(() => call('accounts.coverage', account!.id, Math.max(1, Number(days) || 30)))) ?? null);
+    setBusy(false);
+  };
+  const outside = report?.mailboxes.filter((m) => !m.synced && m.outside > 0) ?? [];
+  return (
+    <Modal open={!!account} onClose={onClose} width={980} title={`Coverage check · ${account?.label ?? ''}`} footer={<Button variant="primary" icon={<ScanSearch className="size-4" />} onClick={run} disabled={busy}>{busy ? 'Scanning headers…' : report ? 'Run again' : 'Run check'}</Button>}>
+      <div className="space-y-4">
+        <p className="text-sm text-ink3">Reads only the subject and sender of every message (read-only, nothing is downloaded or changed) and shows which order emails GLIDE picked up, skipped or can't see.</p>
+        <Field label="Look back (days)"><Input value={days} onChange={(e) => setDays(e.target.value)} className="w-32" /></Field>
+        {report && (
+          <>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {report.mailboxes.map((m) => (
+                <div key={m.mailbox} className="rounded-xl border border-line bg-bg2/40 p-3 text-sm">
+                  <div className="flex items-center justify-between"><span className="font-mono text-ink">{m.mailbox}</span><Badge tone={m.synced ? 'good' : 'warn'}>{m.synced ? 'synced' : 'not synced'}</Badge></div>
+                  <div className="mt-1 text-xs text-ink3">{formatNumber(m.messages)} messages · {formatNumber(m.orderLike)} look like order emails</div>
+                  <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
+                    {m.synced ? (
+                      <>
+                        <Badge tone="good">{m.parsed} parsed</Badge>
+                        {!!m.failed && <Badge tone="bad">{m.failed} failed</Badge>}
+                        {!!m.ignored && <Badge tone="warn">{m.ignored} ignored</Badge>}
+                        {!!m.skipped && <Badge tone="bad">{m.skipped} never downloaded</Badge>}
+                        {!!m.pending && <Badge tone="accent">{m.pending} not synced yet</Badge>}
+                      </>
+                    ) : (
+                      <Badge tone={m.outside ? 'warn' : 'good'}>{m.outside} only in this folder</Badge>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {outside.length > 0 && (
+              <div className="rounded-xl border border-warn/40 bg-warn/10 p-3 text-sm text-warn">
+                {outside.reduce((n, m) => n + m.outside, 0)} order emails are outside the synced folders (usually a mail filter that skips the Inbox). Edit this inbox and add <span className="font-mono">{outside[0].mailbox}</span> to its mailboxes to pick them up.
+              </div>
+            )}
+            {report.rows.length > 0 ? (
+              <div className="max-h-[360px] overflow-y-auto rounded-xl border border-line">
+                <table className="w-full text-left text-xs">
+                  <thead className="sticky top-0 bg-panel2 text-[10px] uppercase tracking-wider text-ink3"><tr><th className="p-2">Date</th><th className="p-2">From</th><th className="p-2">Subject</th><th className="p-2">Result</th></tr></thead>
+                  <tbody>
+                    {report.rows.map((r) => (
+                      <tr key={`${r.mailbox}:${r.uid}`} className="border-t border-line/60 align-top">
+                        <td className="whitespace-nowrap p-2 text-ink3">{r.date ? relativeTime(r.date) : '—'}</td>
+                        <td className="max-w-[200px] truncate p-2 font-mono text-ink2" title={r.from}>{r.from}</td>
+                        <td className="p-2 text-ink">{r.subject}</td>
+                        <td className="p-2"><Badge tone={STATE_TONE[r.state] ?? 'neutral'}>{r.state}</Badge>{r.reason && <div className="mt-1 text-[11px] text-ink3">{r.reason}</div>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-good/30 bg-good/10 p-3 text-sm text-good">Every order email in this window was picked up.</div>
+            )}
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}

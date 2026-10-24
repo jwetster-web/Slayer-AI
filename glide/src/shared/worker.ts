@@ -5,6 +5,7 @@ import type { SyncProgress } from './types';
 export type WorkerJob =
   | { type: 'syncAll' }
   | { type: 'syncAccount'; accountId: number }
+  | { type: 'coverage'; accountId: number; days: number }
   | { type: 'importFiles'; paths: string[]; accountId: number | null }
   | { type: 'generateSample'; orders: number }
   | { type: 'render'; request: unknown; filter: unknown; recap: unknown; outPath: string; mp4?: boolean }

@@ -33,25 +33,25 @@ export const RETAILERS: RetailerMeta[] = [
   },
   {
     id: 'pokemoncenter_us', name: 'Pokémon Center', shortName: 'PKC US', region: 'US', currency: 'USD', color: '#ffcb05', primary: true,
-    senderDomains: ['pokemoncenter.com', 'em.pokemoncenter.com', 'email.pokemoncenter.com'],
+    senderDomains: ['pokemoncenter.com', 'em.pokemoncenter.com', 'email.pokemoncenter.com', 'pokemon.com'],
     brandMarkers: [/pok[eé]mon\s*center/i],
     orderNumber: [new RegExp(ORDER_LABEL + String.raw`(P\d{9,10}|\d{9,12})\b`, 'i')],
   },
   {
     id: 'pokemoncenter_uk', name: 'Pokémon Center UK', shortName: 'PKC UK', region: 'GB', currency: 'GBP', color: '#ffcb05', primary: true,
-    senderDomains: ['pokemoncenter.com'],
+    senderDomains: ['pokemoncenter.com', 'pokemon.com'],
     brandMarkers: [/pok[eé]mon\s*center\s*(uk|united kingdom)/i, /uk\.pokemoncenter\.com/i, /pokemoncenter\.com\/en-gb/i],
     orderNumber: [new RegExp(ORDER_LABEL + String.raw`(P\d{9,10}|\d{9,12})\b`, 'i')],
   },
   {
     id: 'pokemoncenter_ca', name: 'Pokémon Center Canada', shortName: 'PKC CA', region: 'CA', currency: 'CAD', color: '#ffcb05', primary: true,
-    senderDomains: ['pokemoncenter.com'],
+    senderDomains: ['pokemoncenter.com', 'pokemon.com'],
     brandMarkers: [/pok[eé]mon\s*center\s*canada/i, /pokemoncenter\.com\/en-ca/i, /pokemoncenter\.com\/fr-ca/i],
     orderNumber: [new RegExp(ORDER_LABEL + String.raw`(P\d{9,10}|\d{9,12})\b`, 'i')],
   },
   {
     id: 'pokemoncenter_de', name: 'Pokémon Center Germany', shortName: 'PKC DE', region: 'DE', currency: 'EUR', color: '#ffcb05', primary: true,
-    senderDomains: ['pokemoncenter.com'],
+    senderDomains: ['pokemoncenter.com', 'pokemon.com'],
     brandMarkers: [/pokemoncenter\.com\/de-de/i, /pok[eé]mon\s*center\s*(deutschland|germany)/i, /Bestellbest[äa]tigung/i],
     orderNumber: [new RegExp(ORDER_LABEL + String.raw`(P\d{9,10}|\d{9,12})\b`, 'i')],
   },
@@ -77,7 +77,8 @@ export const RETAILERS: RetailerMeta[] = [
     id: 'samsclub', name: "Sam's Club", shortName: "Sam's", region: 'US', currency: 'USD', color: '#0067a0', primary: true,
     senderDomains: ['samsclub.com', 'email.samsclub.com'],
     brandMarkers: [/\bsamsclub\.com\b/i, /\bSam'?s Club\b/i],
-    orderNumber: [new RegExp(ORDER_LABEL + String.raw`(\d{9,13})\b`, 'i')],
+    // Online orders print as 8000000-70883055 or 800000070883055.
+    orderNumber: [new RegExp(ORDER_LABEL + String.raw`(\d{7}-\d{8}|\d{9,15})\b`, 'i'), /#\s*(\d{7}-\d{8}|\d{15})\b/],
   },
   {
     id: 'gamestop', name: 'GameStop', shortName: 'GameStop', region: 'US', currency: 'USD', color: '#e2231a', primary: false,
@@ -110,6 +111,12 @@ export const RETAILERS: RetailerMeta[] = [
     orderNumber: [new RegExp(ORDER_LABEL + String.raw`(T\d{8,11})\b`, 'i')],
   },
   {
+    id: 'ebay', name: 'eBay', shortName: 'eBay', region: 'US', currency: 'USD', color: '#e53238', primary: false,
+    senderDomains: ['ebay.com'],
+    brandMarkers: [/\bebay\.com\b/i],
+    orderNumber: [/\b(\d{2}-\d{5}-\d{5})\b/, new RegExp(ORDER_LABEL + String.raw`(\d{12})\b`, 'i')],
+  },
+  {
     id: 'mattel', name: 'Mattel Creations', shortName: 'Mattel', region: 'US', currency: 'USD', color: '#e4002b', primary: false,
     senderDomains: ['mattel.com', 'creations.mattel.com'],
     brandMarkers: [/mattel\s*creations/i, /creations\.mattel\.com/i],
@@ -119,13 +126,13 @@ export const RETAILERS: RetailerMeta[] = [
     id: 'shopify', name: 'Shopify Store', shortName: 'Shopify', region: 'INTL', currency: 'USD', color: '#95bf47', primary: false,
     senderDomains: ['shopify.com', 'myshopify.com'],
     brandMarkers: [/cdn\.shopify\.com/i, /myshopify\.com/i, /shopifyemail/i],
-    orderNumber: [/(?:order|bestellung)\s*#\s*([A-Z0-9-]{3,14})\b/i],
+    orderNumber: [/(?:order|bestellung)\s*#\s*([A-Z0-9_-]{3,16})\b/i, /\border\s+([A-Z]{0,6}_?\d[A-Z0-9_-]{2,15})\s+(?:is\s+)?confirmed\b/i],
   },
   {
     id: 'custom', name: 'Other Retailer', shortName: 'Other', region: 'INTL', currency: 'USD', color: '#8b93a7', primary: false,
     senderDomains: [],
     brandMarkers: [],
-    orderNumber: [new RegExp(ORDER_LABEL + String.raw`([A-Z0-9-]{5,20})\b`, 'i')],
+    orderNumber: [new RegExp(ORDER_LABEL + String.raw`([A-Z0-9_-]{5,20})\b`, 'i')],
   },
 ];
 

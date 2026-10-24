@@ -13,6 +13,7 @@ import { applyImport, listImportBatches, parseCsv, previewImport, rollbackImport
 import { invoicePdf } from '../src/core/csv/invoicePdf';
 import { now, json } from '../src/core/db/database';
 import { syncGuildMembers, testConnection, type DiscordConfig } from '../src/core/discord/discord';
+import type { CoverageReport } from '../src/core/email/coverage';
 import { guessImapHost } from '../src/core/email/imapSync';
 import { runLoopbackFlow, type OAuthClientConfig, type OAuthProvider } from '../src/core/email/oauth';
 import { buildRecapData, type RecapOptions } from '../src/core/export/data';
@@ -311,6 +312,7 @@ export function createHandlers(ctx: HandlerContext) {
       w.db.run('DELETE FROM email_accounts WHERE id = ?', [id]);
       audit(w.db, ACTOR, 'account_removed', 'email_account', id);
     },
+    'accounts.coverage': (id: number, days = 30) => ctx.runJob({ type: 'coverage', accountId: id, days }) as Promise<CoverageReport>,
     'accounts.syncNow': (id?: number) => ctx.runJob(id ? { type: 'syncAccount', accountId: id } : { type: 'syncAll' }),
     'accounts.setOAuthClient': (provider: OAuthProvider, cfg: OAuthClientConfig) => cur().secrets.setJson(`oauth:client:${provider}`, cfg),
     'accounts.getOAuthClient': (provider: OAuthProvider) => {

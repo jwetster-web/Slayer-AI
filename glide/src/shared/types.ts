@@ -21,6 +21,7 @@ export type RetailerId =
   | 'barnesnoble'
   | 'macys'
   | 'lego'
+  | 'ebay'
   | 'mattel'
   | 'shopify'
   | 'custom';

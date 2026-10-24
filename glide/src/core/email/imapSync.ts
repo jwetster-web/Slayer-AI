@@ -35,6 +35,20 @@ export interface MailClient {
   search(query: Record<string, unknown>, opts: { uid: true }): Promise<number[] | false | undefined>;
   fetchAll(range: string, query: Record<string, unknown>, opts: { uid: true }): Promise<FetchedMessage[]>;
   logout(): Promise<void>;
+  list?(): Promise<{ path: string; specialUse?: string; flags?: Set<string> }[]>;
+}
+
+/**
+ * Folders to sync. An account left on the default ["INBOX"] syncs the server's "All Mail" folder
+ * when it has one (Gmail): order mail is often archived by filters or forwarded from the account
+ * itself, and none of that is in the Inbox. All Mail already contains the Inbox but not Spam/Trash.
+ */
+export async function resolveMailboxes(client: MailClient, account: AccountRow): Promise<string[]> {
+  const configured: string[] = JSON.parse(account.mailboxes_json || '["INBOX"]');
+  if (configured.length !== 1 || configured[0].toUpperCase() !== 'INBOX' || !client.list) return configured;
+  const boxes = await client.list();
+  const all = boxes.find((b) => b.specialUse === '\\All' || b.flags?.has('\\All'));
+  return all ? [all.path] : configured;
 }
 
 export interface AccountRow {
@@ -123,7 +137,7 @@ export async function syncAccount(db: Db, account: AccountRow, client: MailClien
   progress('connecting');
   try {
     await client.connect();
-    const mailboxes: string[] = JSON.parse(account.mailboxes_json || '["INBOX"]');
+    const mailboxes = await withRetry(() => resolveMailboxes(client, account), opts.signal);
     for (const mailbox of mailboxes) {
       if (opts.signal?.aborted) break;
       const mb = await client.mailboxOpen(mailbox, { readOnly: true });

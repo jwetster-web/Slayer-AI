@@ -143,7 +143,7 @@ export function retailerFromText(t: string): RetailerId {
     if (/\b(de|germany|deutschland)\b/.test(s)) return 'pokemoncenter_de';
     return 'pokemoncenter_us';
   }
-  const table: [RegExp, RetailerId][] = [[/target/, 'target'], [/walmart/, 'walmart'], [/amazon/, 'amazon'], [/best\s*buy|bestbuy/, 'bestbuy'], [/costco/, 'costco'], [/sam'?s/, 'samsclub'], [/gamestop/, 'gamestop'], [/hot\s*topic/, 'hottopic'], [/barnes/, 'barnesnoble'], [/macy/, 'macys'], [/lego/, 'lego'], [/mattel/, 'mattel'], [/shopify/, 'shopify']];
+  const table: [RegExp, RetailerId][] = [[/target/, 'target'], [/walmart/, 'walmart'], [/amazon/, 'amazon'], [/best\s*buy|bestbuy/, 'bestbuy'], [/costco/, 'costco'], [/sam'?s/, 'samsclub'], [/gamestop/, 'gamestop'], [/hot\s*topic/, 'hottopic'], [/barnes/, 'barnesnoble'], [/macy/, 'macys'], [/lego/, 'lego'], [/ebay/, 'ebay'], [/mattel/, 'mattel'], [/shopify/, 'shopify']];
   for (const [re, id] of table) if (re.test(s)) return id;
   return 'custom';
 }

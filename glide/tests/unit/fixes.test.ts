@@ -141,3 +141,32 @@ describe('address CSV (DISCORD_USERNAME, FULL_NAME, ADDRESS … ZIP as ="…")',
     expect(db.all<{ postal: string }>('SELECT postal FROM addresses').map((a) => a.postal)).toContain('02134');
   });
 });
+
+describe('second pass: All Mail, Pokémon Center, eBay, Sam\'s Club', () => {
+  it('syncs Gmail "All Mail" when the account is on the default Inbox', async () => {
+    const { resolveMailboxes } = await import('../../src/core/email/imapSync');
+    const list = async () => [{ path: 'INBOX' }, { path: '[Gmail]/All Mail', specialUse: '\\All' }, { path: '[Gmail]/Spam', specialUse: '\\Junk' }];
+    const client = { list } as never;
+    expect(await resolveMailboxes(client, { mailboxes_json: '["INBOX"]' } as never)).toEqual(['[Gmail]/All Mail']);
+    expect(await resolveMailboxes(client, { mailboxes_json: '["INBOX","Orders"]' } as never)).toEqual(['INBOX', 'Orders']);
+    expect(await resolveMailboxes({ list: async () => [{ path: 'INBOX' }] } as never, { mailboxes_json: '["INBOX"]' } as never)).toEqual(['INBOX']);
+  });
+
+  it('recognises Pokémon Center mail sent from em.pokemon.com', () => {
+    const r = parseRetailEmail({ from: 'info@em.pokemon.com', to: ['me@example.com'], subject: 'Thank you for shopping at PokemonCenter.com!', text: 'Pokémon Center\nOrder Number: P001234567\nOrder Total: $54.99', date: '2026-10-20T16:00:00Z' } as never);
+    expect(r.status === 'parsed' && r.result.retailer).toBe('pokemoncenter_us');
+    expect(r.status === 'parsed' && r.result.orderNumber).toBe('P001234567');
+  });
+
+  it('parses eBay order confirmations', () => {
+    const r = parseRetailEmail({ from: 'ebay@ebay.com', to: ['me@example.com'], subject: 'Order confirmed: Pokemon TCG: 30th Ce...', text: 'Order number: 12-13579-24680\nTotal $89.99', date: '2026-10-20T16:00:00Z' } as never);
+    expect(r.status === 'parsed' && [r.result.retailer, r.result.orderNumber]).toEqual(['ebay', '12-13579-24680']);
+  });
+
+  it("reads Sam's Club order numbers and pickup milestones", () => {
+    expect(classifyMessageType('Ready for pickup: items from order #800000070883055', [])).toBe('out_for_delivery');
+    expect(classifyMessageType('Picked up at 11:47 am: items from order #8000000-70883055', [])).toBe('delivery');
+    const r = parseRetailEmail({ from: 'no-reply@transaction.samsclub.com', to: ['me@example.com'], subject: 'Chloe, thanks for your curbside pickup order', text: "Sam's Club\nOrder #8000000-70883055\nTotal $120.00", date: '2026-10-20T16:00:00Z' } as never);
+    expect(r.status === 'parsed' && r.result.orderNumber).toBe('8000000-70883055');
+  });
+});

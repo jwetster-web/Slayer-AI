@@ -9,6 +9,7 @@ import { parentPort, workerData } from 'node:worker_threads';
 import { runAutomations } from '../src/core/automation/rules';
 import { openDb, now, type Db } from '../src/core/db/database';
 import { flushOutbox, type DiscordConfig } from '../src/core/discord/discord';
+import { mailCoverage } from '../src/core/email/coverage';
 import { createImapClient, guessImapHost, isThrottleError, RetryableSyncError, syncAccount, type AccountRow } from '../src/core/email/imapSync';
 import { splitMbox } from '../src/core/email/mime';
 import { refreshTokens, type OAuthClientConfig, type OAuthTokens } from '../src/core/email/oauth';
@@ -180,6 +181,11 @@ async function handle(job: WorkerJob): Promise<unknown> {
       } finally {
         changed('accounts');
       }
+    case 'coverage': {
+      const a = db.get<any>('SELECT * FROM email_accounts WHERE id = ?', [job.accountId]);
+      if (!a || a.kind === 'import') throw new Error('Coverage check needs a connected inbox');
+      return mailCoverage(db, a, (await createImapClient(await connectionFor(a))) as never, job.days);
+    }
     case 'importFiles':
       return importFiles(job.paths, job.accountId);
     case 'generateSample': {
