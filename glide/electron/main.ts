@@ -186,7 +186,10 @@ function createWindow() {
     backgroundColor: '#05060d',
     title: 'GLIDE',
     show: false,
+    // macOS keeps its traffic lights; elsewhere the window is frameless and the
+    // renderer draws its own minimize / maximize / close controls.
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    frame: process.platform === 'darwin',
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
@@ -197,6 +200,8 @@ function createWindow() {
     },
   });
   win.once('ready-to-show', () => win?.show());
+  win.on('maximize', () => send({ kind: 'window', maximized: true }));
+  win.on('unmaximize', () => send({ kind: 'window', maximized: false }));
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//i.test(url)) void shell.openExternal(url);
     return { action: 'deny' };

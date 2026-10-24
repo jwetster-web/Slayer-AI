@@ -9,7 +9,7 @@ import { parentPort, workerData } from 'node:worker_threads';
 import { runAutomations } from '../src/core/automation/rules';
 import { openDb, now, type Db } from '../src/core/db/database';
 import { flushOutbox, type DiscordConfig } from '../src/core/discord/discord';
-import { createImapClient, guessImapHost, syncAccount, type AccountRow } from '../src/core/email/imapSync';
+import { createImapClient, guessImapHost, isThrottleError, RetryableSyncError, syncAccount, type AccountRow } from '../src/core/email/imapSync';
 import { splitMbox } from '../src/core/email/mime';
 import { refreshTokens, type OAuthClientConfig, type OAuthTokens } from '../src/core/email/oauth';
 import { loadTemplates, processRawMessage, readRawMessage, type MessageRef } from '../src/core/email/process';
@@ -61,9 +61,14 @@ async function connectionFor(a: AccountRow & { kind: string; address: string; ho
 }
 
 const running = new Set<number>();
+// After a throttling error an inbox cools down (2, 4, 8 … 30 min) instead of being hit again every poll,
+// which is what keeps a provider's rate limit from escalating into a temporary lockout.
+const cooldown = new Map<number, { until: number; strikes: number }>();
 
-async function syncOne(accountId: number) {
+async function syncOne(accountId: number, force = false) {
   if (running.has(accountId)) return { skipped: true };
+  const cd = cooldown.get(accountId);
+  if (!force && cd && Date.now() < cd.until) return { skipped: true, coolingDownUntil: new Date(cd.until).toISOString() };
   running.add(accountId);
   try {
     const a = db.get<any>('SELECT * FROM email_accounts WHERE id = ?', [accountId]);
@@ -77,9 +82,18 @@ async function syncOne(accountId: number) {
       sink,
       onProgress: (progress) => emit({ kind: 'progress', progress }),
     });
+    cooldown.delete(accountId);
     await afterEvents(sink);
     if (summary.processed) changed('orders', 'activity', 'identity');
     return summary;
+  } catch (e) {
+    if (e instanceof RetryableSyncError || isThrottleError(e)) {
+      const strikes = (cooldown.get(accountId)?.strikes ?? 0) + 1;
+      const until = Date.now() + Math.min(30, 2 ** strikes) * 60000;
+      cooldown.set(accountId, { until, strikes });
+      emit({ kind: 'log', level: 'warn', message: `inbox ${accountId} throttled by the mail server; pausing it until ${new Date(until).toLocaleTimeString()}` });
+    }
+    throw e;
   } finally {
     running.delete(accountId);
   }
@@ -162,7 +176,7 @@ async function handle(job: WorkerJob): Promise<unknown> {
     }
     case 'syncAccount':
       try {
-        return await syncOne(job.accountId);
+        return await syncOne(job.accountId, true);
       } finally {
         changed('accounts');
       }

@@ -1,10 +1,10 @@
 import { AnimatePresence, motion } from 'motion/react';
 import {
-  Activity, BarChart3, Boxes, ChevronDown, Fingerprint, Gauge, Inbox, LayoutDashboard, ListOrdered, Moon, Radar, ScrollText, Search, Settings, Sparkles, Sun, Truck, Users, UserSquare2,
+  Activity, BarChart3, Boxes, ChevronDown, Copy, Fingerprint, Gauge, Inbox, LayoutDashboard, ListOrdered, Minus, Moon, Radar, ScrollText, Search, Settings, Sparkles, Square, Sun, Truck, Users, UserSquare2, X,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { relativeTime } from '../../shared/format';
-import { call } from '../lib/api';
+import { call, platform } from '../lib/api';
 import { useAction, useQuery } from '../lib/hooks';
 import { useStore, type PageId } from '../lib/store';
 import { Aurora, ParticleField } from './fx';
@@ -208,7 +208,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <ParticleField />
       <Sidebar />
       <div className="relative z-10 flex min-w-0 flex-1 flex-col">
-        <header className="drag-region flex h-[68px] shrink-0 items-center gap-4 border-b border-line/70 bg-bg/30 px-7 backdrop-blur-xl">
+        <header onDoubleClick={(e) => e.target === e.currentTarget && platform() !== 'darwin' && void call('window.toggleMaximize')} className="drag-region flex h-[68px] shrink-0 items-center gap-4 border-b border-line/70 bg-bg/30 pl-7 pr-3 backdrop-blur-xl">
           <GlobalSearch />
           <div className="flex-1" />
           {ws?.isSample && (
@@ -219,6 +219,7 @@ export function Shell({ children }: { children: ReactNode }) {
           <LiveDot />
           <ThemeToggle />
           <WorkspaceMenu />
+          <WindowControls />
         </header>
         <main className="relative flex-1 overflow-y-auto">
           <AnimatePresence mode="wait">
@@ -239,6 +240,31 @@ function LiveDot() {
     <div className="no-drag flex items-center gap-2 text-xs text-ink3" title="Live updates">
       <motion.span key={flash} initial={{ scale: 1.8, opacity: 0.4 }} animate={{ scale: 1, opacity: 1 }} className="size-2 rounded-full bg-good shadow-[0_0_10px_var(--g-good)]" />
       <Activity className="size-4" />
+    </div>
+  );
+}
+
+/** Minimize / maximize / close for the frameless window (macOS keeps its native traffic lights). */
+export function WindowControls({ className }: { className?: string }) {
+  const [maximized, setMaximized] = useState(false);
+  useEffect(() => {
+    if (platform() === 'darwin') return;
+    void call('window.isMaximized').then(setMaximized);
+    return window.glide?.on((e: any) => e.kind === 'window' && setMaximized(!!e.maximized));
+  }, []);
+  if (platform() === 'darwin') return null;
+  const btn = 'no-drag focus-ring grid h-9 w-10 place-items-center rounded-lg text-ink3 transition';
+  return (
+    <div className={cx('no-drag flex items-center gap-0.5 border-l border-line/70 pl-3', className)}>
+      <button aria-label="Minimize" title="Minimize" onClick={() => void call('window.minimize')} className={cx(btn, 'hover:bg-white/[0.06] hover:text-ink')}>
+        <Minus className="size-4" />
+      </button>
+      <button aria-label={maximized ? 'Restore' : 'Maximize'} title={maximized ? 'Restore' : 'Maximize'} onClick={() => void call('window.toggleMaximize').then(setMaximized)} className={cx(btn, 'hover:bg-white/[0.06] hover:text-ink')}>
+        {maximized ? <Copy className="size-3.5 -scale-x-100" /> : <Square className="size-3.5" />}
+      </button>
+      <button aria-label="Close" title="Close" onClick={() => void call('window.close')} className={cx(btn, 'hover:bg-bad hover:text-white hover:shadow-[0_0_18px_-4px_var(--g-bad)]')}>
+        <X className="size-4" />
+      </button>
     </div>
   );
 }

@@ -463,6 +463,16 @@ export function createHandlers(ctx: HandlerContext) {
     },
 
     // -- CSV ----------------------------------------------------------------
+    'window.minimize': () => ctx.window()?.minimize(),
+    'window.toggleMaximize': () => {
+      const w = ctx.window();
+      if (!w) return false;
+      if (w.isMaximized()) w.unmaximize();
+      else w.maximize();
+      return w.isMaximized();
+    },
+    'window.isMaximized': () => ctx.window()?.isMaximized() ?? false,
+    'window.close': () => ctx.window()?.close(),
     'csv.parse': (filePath: string, preset?: string) => {
       const csv = parseCsv(readFileSync(filePath, 'utf8'), preset);
       const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;

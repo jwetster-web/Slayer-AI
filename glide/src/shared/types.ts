@@ -21,6 +21,7 @@ export type RetailerId =
   | 'barnesnoble'
   | 'macys'
   | 'lego'
+  | 'mattel'
   | 'shopify'
   | 'custom';
 
@@ -336,7 +337,7 @@ export interface EmailAccountRow {
   host: string | null;
   port: number | null;
   enabled: boolean;
-  status: 'connected' | 'syncing' | 'error' | 'idle' | 'needs_auth' | 'disabled';
+  status: 'connected' | 'syncing' | 'error' | 'idle' | 'needs_auth' | 'throttled' | 'disabled';
   lastSyncAt: ISODate | null;
   lastError: string | null;
   processedCount: number;

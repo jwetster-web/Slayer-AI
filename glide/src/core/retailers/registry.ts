@@ -110,6 +110,12 @@ export const RETAILERS: RetailerMeta[] = [
     orderNumber: [new RegExp(ORDER_LABEL + String.raw`(T\d{8,11})\b`, 'i')],
   },
   {
+    id: 'mattel', name: 'Mattel Creations', shortName: 'Mattel', region: 'US', currency: 'USD', color: '#e4002b', primary: false,
+    senderDomains: ['mattel.com', 'creations.mattel.com'],
+    brandMarkers: [/mattel\s*creations/i, /creations\.mattel\.com/i],
+    orderNumber: [/(CHP\d{6,12})\b/i],
+  },
+  {
     id: 'shopify', name: 'Shopify Store', shortName: 'Shopify', region: 'INTL', currency: 'USD', color: '#95bf47', primary: false,
     senderDomains: ['shopify.com', 'myshopify.com'],
     brandMarkers: [/cdn\.shopify\.com/i, /myshopify\.com/i, /shopifyemail/i],
@@ -129,8 +135,30 @@ export function retailer(id: string): RetailerMeta {
   return RETAILER_MAP.get(id as RetailerId) ?? RETAILER_MAP.get('custom')!;
 }
 
+const RELAY_DOMAINS = ['icloud.com', 'privaterelay.appleid.com', 'duck.com', 'relay.firefox.com', 'mozmail.com', 'simplelogin.com', 'aleeas.com', 'slmail.me'];
+const TLD = /^(com|net|org|io|co|us|uk|ca|de|fr|au|shop|store|app|gg|tv|me|info|biz)$/;
+
+/**
+ * Original sender behind an email-relay alias, e.g. iCloud Hide My Email
+ * `orders_at_oe1_target_com_m2x330qtcf23yp_cc9j9599@icloud.com` -> `orders@oe1.target.com`
+ * or DuckDuckGo `orders_at_target.com_abc@duck.com`. Returns null for normal addresses.
+ */
+export function unrelayAddress(addr: string): string | null {
+  const m = addr.toLowerCase().match(/([a-z0-9._+-]+)_at_([a-z0-9._-]+)@([a-z0-9.-]+)/);
+  if (!m || !domainMatches(m[3], RELAY_DOMAINS)) return null;
+  const parts = m[2].split(/[._]/);
+  // The original domain ends at the last TLD-looking label; anything after it is the alias suffix.
+  let end = -1;
+  for (let i = 1; i < parts.length; i++) if (TLD.test(parts[i])) end = i;
+  if (end < 1) return null;
+  // Two-part TLDs such as co.uk.
+  if (end + 1 < parts.length && parts[end] === 'co' && TLD.test(parts[end + 1])) end++;
+  return `${m[1]}@${parts.slice(0, end + 1).join('.')}`;
+}
+
 export function domainOf(addr: string): string {
-  const m = addr.toLowerCase().match(/@([a-z0-9.-]+)/);
+  const real = unrelayAddress(addr);
+  const m = (real ?? addr).toLowerCase().match(/@([a-z0-9.-]+)/);
   return m ? m[1] : '';
 }
 

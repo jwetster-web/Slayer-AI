@@ -182,7 +182,63 @@ export const DHL: TrackingProvider = {
   },
 };
 
-export const PROVIDERS: TrackingProvider[] = [UPS, FEDEX, USPS, DHL];
+const STAGE: Record<string, PackageStatus> = {
+  InfoReceived: 'label_created', PickedUp: 'in_transit', Departure: 'in_transit', Arrival: 'in_transit', InTransit: 'in_transit',
+  AvailableForPickup: 'out_for_delivery', OutForDelivery: 'out_for_delivery', Delivered: 'delivered', DeliveryFailure: 'exception',
+  Exception: 'exception', Returning: 'returned', Returned: 'returned', Expired: 'exception',
+};
+
+/**
+ * 17TRACK: one API key tracks every carrier (UPS, FedEx, USPS, Amazon Logistics, OnTrac, DHL…).
+ * Numbers must be registered once before their info can be read; re-registering is harmless.
+ */
+export const SEVENTEEN_TRACK: TrackingProvider = {
+  id: '17track',
+  name: '17TRACK (all carriers, one API key)',
+  carriers: ['ups', 'fedex', 'usps', 'dhl', 'ontrac', 'lasership', 'amazon', 'royalmail', 'canadapost', 'other'],
+  async track(numbers, creds, fetcher = fetch) {
+    const headers = { '17token': creds.apiKey ?? '', 'Content-Type': 'application/json' };
+    const out: TrackingResult[] = [];
+    for (let i = 0; i < numbers.length; i += 40) {
+      const body = JSON.stringify(numbers.slice(i, i + 40).map((number) => ({ number })));
+      const reg = await fetcher('https://api.17track.net/track/v2.2/register', { method: 'POST', headers, body });
+      if (reg.status === 401 || reg.status === 403) throw new Error(`17TRACK rejected the API key (${reg.status})`);
+      const res = await fetcher('https://api.17track.net/track/v2.2/gettrackinfo', { method: 'POST', headers, body });
+      if (!res.ok) throw new Error(`17TRACK track failed (${res.status})`);
+      const j = (await res.json()) as any;
+      for (const a of j?.data?.accepted ?? []) {
+        const info = a.track_info ?? {};
+        const events = (info.tracking?.providers ?? []).flatMap((p: any) => p.events ?? []);
+        const latest = info.latest_status?.status as string | undefined;
+        out.push({
+          trackingNumber: a.number,
+          estimatedDelivery: info.time_metrics?.estimated_delivery_date?.to ?? info.time_metrics?.estimated_delivery_date?.from ?? undefined,
+          events: events.length
+            ? events.map((e: any) => {
+                const fromText = statusFromText(e.description ?? '');
+                return {
+                  status: fromText !== 'unknown' ? fromText : STAGE[e.stage ?? e.sub_status?.split('_')[0] ?? ''] ?? 'in_transit',
+                  description: e.description ?? 'Update',
+                  location: e.location || null,
+                  occurredAt: iso(e.time_utc ?? e.time_iso),
+                };
+              })
+            : latest && STAGE[latest]
+              ? [{ status: STAGE[latest], description: latest.replace(/([a-z])([A-Z])/g, '$1 $2'), location: null, occurredAt: iso(info.latest_event?.time_utc ?? info.latest_event?.time_iso) }]
+              : [],
+        });
+      }
+    }
+    return out;
+  },
+};
+
+export const PROVIDERS: TrackingProvider[] = [UPS, FEDEX, USPS, DHL, SEVENTEEN_TRACK];
+
+/** The carrier's own API when configured, otherwise 17TRACK when it has a key. */
+export function providerFor(carrier: string, hasCreds: (id: string) => boolean): TrackingProvider | undefined {
+  return PROVIDERS.find((x) => x.id !== SEVENTEEN_TRACK.id && x.carriers.includes(carrier as Carrier) && hasCreds(x.id)) ?? (hasCreds(SEVENTEEN_TRACK.id) ? SEVENTEEN_TRACK : undefined);
+}
 
 export interface RefreshDeps {
   db: Db;
@@ -205,8 +261,8 @@ export async function refreshDuePackages(deps: RefreshDeps): Promise<{ checked: 
   let skipped = 0;
   const byProvider = new Map<TrackingProvider, typeof due>();
   for (const p of due) {
-    const prov = PROVIDERS.find((x) => x.carriers.includes(p.carrier as Carrier));
-    if (!prov || !deps.credentialsFor(prov.id)) {
+    const prov = providerFor(p.carrier, (id) => !!deps.credentialsFor(id));
+    if (!prov) {
       skipped++;
       continue;
     }
@@ -237,7 +293,9 @@ export async function refreshDuePackages(deps: RefreshDeps): Promise<{ checked: 
         }
         const status = db.value<string>('SELECT status FROM packages WHERE id = ?', [p.id]);
         if (status === 'delivered') db.run('UPDATE order_items SET delivered_qty = MAX(delivered_qty, shipped_qty) WHERE order_id = ? AND (SELECT COUNT(*) FROM packages WHERE order_id = ? AND status <> ?) = 0', [p.order_id, p.order_id, 'delivered']);
-        db.run('UPDATE packages SET last_verified_at = ?, check_failures = 0, next_check_at = ?, estimated_delivery = COALESCE(?, estimated_delivery) WHERE id = ?', [now(), new Date(Date.now() + 3 * 3600000).toISOString(), r?.estimatedDelivery ?? null, p.id]);
+        // Out-for-delivery packages are re-checked hourly so "delivered" shows up the same day.
+        const nextIn = status === 'out_for_delivery' ? 1 : 3;
+        db.run('UPDATE packages SET last_verified_at = ?, check_failures = 0, next_check_at = ?, estimated_delivery = COALESCE(?, estimated_delivery) WHERE id = ?', [now(), new Date(Date.now() + nextIn * 3600000).toISOString(), r?.estimatedDelivery ?? null, p.id]);
         if (changed) {
           recomputeOrder(db, p.order_id);
           updated++;

@@ -16,12 +16,13 @@ const TYPE_RULES: [MessageType, RegExp][] = [
   ['cancellation', /cancel+ed|cancel+ation|we had to cancel|storniert|annul[ée]e/i],
   ['refund', /\brefund(ed)?\b|r[üu]ckerstattung|credit has been issued|money back|remboursement/i],
   ['return', /return (has been )?(received|processed|started|initiated|label)|we('ve| have) received your return|r[üu]cksendung/i],
-  ['out_for_delivery', /out for delivery|arriving today|in zustellung|en cours de livraison/i],
-  ['delivery', /\bdelivered\b|has arrived|was delivered|zugestellt|livr[ée]e?\b/i],
-  ['shipping', /\bshipped\b|on (its|the) way|has been dispatched|\bdispatched\b|versandt|verschickt|is coming|tracking (number|info)|en route|has shipped|ready for delivery|exp[ée]di[ée]/i],
+  ['out_for_delivery', /out for delivery|arriv(ing|es) today|in zustellung|en cours de livraison/i],
+  ['delivery', /\bdelivered\b|has arrived|have arrived|was delivered|zugestellt|livr[ée]e?\b/i],
+  ['shipping', /\bshipped\b|on (its|the) way|has been dispatched|\bdispatched\b|versandt|verschickt|is coming|tracking (number|info)|en route|has shipped|ready for delivery|about to ship|arriv(es|ing) (tomorrow|soon)|exp[ée]di[ée]/i],
   ['backorder', /back[- ]?order(ed)?|preorder update/i],
   ['delay', /\bdelay(ed)?\b|running late|taking longer/i],
-  ['order_confirmation', /thank(s| you)\s+for\s+(your\s+)?(order|purchase|shopping)|order confirm|confirm(ation|ed)? (of )?(your )?order|order (has been )?(received|placed)|we('ve| have) (got|received) your order|bestellbest[äa]tigung|vielen dank f[üu]r ihre bestellung|^ordered:|order #?\s*[A-Z0-9-]+\s+(is\s+)?confirmed|your order is confirmed|merci pour votre commande/i],
+  // "Thanks for your Target order", "thanks for your curbside pickup order", "Order AQTR_966 confirmed", "We got your order"…
+  ['order_confirmation', /thank(s| you)\s+for\s+(your\s+|the\s+)?([\w'’&-]+\s+){0,3}(order|purchase|shopping)|order confirm|confirm(ation|ed)? (of )?(your )?order|order (has been |was |is )?(received|placed|confirmed)|we('ve| have)? (got|received) your order|here'?s your order|bestellbest[äa]tigung|vielen dank f[üu]r ihre bestellung|^ordered:|order #?\s*[A-Z0-9_-]+\s+(is\s+|has been\s+)?(confirmed|placed)|your .{0,40}order (is|has been) (confirmed|placed)|merci pour votre commande/i],
 ];
 
 export function classifyMessageType(subject: string, headline: string[]): MessageType {
@@ -39,7 +40,8 @@ export function extractOrderNumber(patterns: RegExp[], subject: string, lines: s
   for (const re of patterns) {
     for (const s of sources) {
       const m = s.match(re);
-      if (m?.[1]) return m[1].toUpperCase();
+      // Every real order number has a digit; this stops "Order # has shipped" yielding "HAS".
+      if (m?.[1] && /\d/.test(m[1])) return m[1].toUpperCase();
     }
   }
   return null;

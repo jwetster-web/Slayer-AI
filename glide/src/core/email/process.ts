@@ -10,6 +10,7 @@ import { applyParsedEmail } from '../orders/ingest';
 import { parseRetailEmail, type CustomTemplate, type ParseOutcome } from '../parsing/adapters';
 import { domainOf } from '../retailers/registry';
 import type { DataCipher } from '../secrets';
+import { applyCarrierUpdate, parseCarrierEmail, type CarrierUpdate } from '../tracking/carrierEmail';
 import { unwrapForwarded } from './forwarded';
 import { parseMime } from './mime';
 
@@ -79,16 +80,27 @@ export async function processRawMessage(deps: ProcessDeps, raw: Buffer, ref: Mes
   } catch (e) {
     outcome = { status: 'failed', reason: `MIME parse error: ${(e as Error).message}`, retailer: 'custom', type: 'unknown' };
   }
+  // Not a retailer email: it may be a carrier notice (UPS/FedEx/USPS…) about a package we already track.
+  let carrierUpdate: CarrierUpdate | null = null;
+  if (outcome.status === 'ignored' && inner) {
+    try {
+      carrierUpdate = parseCarrierEmail(inner);
+    } catch {
+      carrierUpdate = null;
+    }
+  }
 
   const rec = receivedAt ?? now();
   return db.tx(() => {
     if (alreadyProcessed(db, ref)) return { status: 'already_processed' as const };
-    const isRetail = outcome.status !== 'ignored';
+    const isRetail = outcome.status !== 'ignored' || !!carrierUpdate;
     const retailerId = outcome.status === 'parsed' ? outcome.result.retailer : outcome.retailer ?? null;
     const type = outcome.status === 'parsed' ? outcome.result.type : outcome.type ?? 'unknown';
     // Non-retail mail keeps only what is needed for idempotency: no subject, sender domain only.
-    const fromAddr = isRetail ? inner?.from ?? outer?.from ?? '' : domainOf(outer?.from ?? '');
-    const subject = isRetail ? inner?.subject ?? outer?.subject ?? '' : '';
+    // Mail from a recognised retailer that wasn't an order event keeps its subject so missed orders can be diagnosed.
+    const keepMeta = isRetail || !!retailerId;
+    const fromAddr = keepMeta ? inner?.from ?? outer?.from ?? '' : domainOf(outer?.from ?? '');
+    const subject = keepMeta ? inner?.subject ?? outer?.subject ?? '' : '';
     const sample = outcome.status === 'failed' ? redact([inner?.subject ?? '', ...(inner?.text ?? inner?.html?.replace(/<[^>]+>/g, ' ') ?? '').split(/\s+/).slice(0, 120)].join(' '), 600) : null;
     const id = db.run(
       `INSERT INTO source_messages (account_id, mailbox, uid, uid_validity, import_ref, message_id_header, original_message_id, content_hash, from_addr, subject, sent_at, received_at,
@@ -124,6 +136,12 @@ export async function processRawMessage(deps: ProcessDeps, raw: Buffer, ref: Mes
       db.run('INSERT INTO source_message_blobs (message_id, encrypted, data) VALUES (?, ?, ?)', [id, settings.encryptRawEmails && deps.cipher ? 1 : 0, enc]);
     }
 
+    if (carrierUpdate) {
+      const r = applyCarrierUpdate(db, carrierUpdate, inner?.date ?? outer?.date ?? rec, id, deps.sink);
+      const t = carrierUpdate.status === 'delivered' ? 'delivery' : carrierUpdate.status === 'out_for_delivery' ? 'out_for_delivery' : carrierUpdate.status === 'delayed' ? 'delay' : 'shipping';
+      db.run('UPDATE source_messages SET parse_status = ?, message_type = ?, order_id = ?, parse_error = ? WHERE id = ?', [r.packages ? 'parsed' : 'ignored', t, r.orderIds[0] ?? null, r.packages ? null : 'carrier notice for a package GLIDE is not tracking', id]);
+      return { status: r.packages ? ('parsed' as const) : ('ignored' as const), sourceMessageId: id, orderId: r.orderIds[0], type: t };
+    }
     if (outcome.status !== 'parsed') {
       return { status: outcome.status, sourceMessageId: id, reason: outcome.reason, retailer: retailerId ?? undefined, type };
     }

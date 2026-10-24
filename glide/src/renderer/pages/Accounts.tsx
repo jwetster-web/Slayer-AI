@@ -8,7 +8,7 @@ import { useAction, useQuery } from '../lib/hooks';
 import { useStore } from '../lib/store';
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Tabs, Toggle } from '../components/ui';
 
-const STATUS_TONE: Record<string, 'good' | 'accent' | 'bad' | 'warn' | 'neutral'> = { connected: 'good', syncing: 'accent', error: 'bad', needs_auth: 'warn', idle: 'neutral', disabled: 'neutral' };
+const STATUS_TONE: Record<string, 'good' | 'accent' | 'bad' | 'warn' | 'neutral'> = { connected: 'good', syncing: 'accent', error: 'bad', needs_auth: 'warn', throttled: 'warn', idle: 'neutral', disabled: 'neutral' };
 
 export function ImportProgress() {
   const [p, setP] = useState<{ done: number; total: number; label: string } | null>(null);

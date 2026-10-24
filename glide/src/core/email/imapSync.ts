@@ -45,8 +45,8 @@ export interface AccountRow {
   created_at: string;
 }
 
-const RETAIL_DOMAINS = RETAILERS.flatMap((r) => r.senderDomains);
-const SUBJECT_HINT = /\b(fwd?|fw|wg|tr)\s*:|forward|order|shipped|shipping|deliver|cancel+ed|refund|tracking|receipt|purchase|bestell|versand|commande|review/i;
+const RETAIL_DOMAINS = [...RETAILERS.flatMap((r) => r.senderDomains), 'ups.com', 'fedex.com', 'usps.com', 'dhl.com', 'ontrac.com', 'lasership.com'];
+const SUBJECT_HINT = /\b(fwd?|fw|wg|tr)\s*:|forward|order|shipped|shipping|shipment|deliver|on (its|the) way|arriv|package|parcel|pick\s*up|cancel+ed|refund|tracking|receipt|purchase|confirm|thank(s| you) for|bestell|versand|commande|review/i;
 
 export function isLikelyRetail(m: FetchedMessage): boolean {
   const from = m.envelope?.from?.[0]?.address ?? '';
@@ -71,6 +71,31 @@ export interface SyncSummary {
   ordersCreated: number;
   ordersUpdated: number;
   failures: number;
+}
+
+const SOURCE_CHUNK = 10;
+
+/** A transient failure: the sync stops cleanly and resumes from the last checkpoint on the next run. */
+export class RetryableSyncError extends Error {}
+
+/** Provider throttling / dropped-connection errors that are worth retrying after a pause. */
+export function isThrottleError(e: unknown): boolean {
+  const x = e as { message?: string; responseText?: string; code?: string } | null;
+  const msg = `${x?.message ?? ''} ${x?.responseText ?? ''} ${x?.code ?? ''}`;
+  return /throttl|rate.?limit|too many|try again|bandwidth|limit exceeded|over ?quota|unavailable|temporar|ECONNRESET|ETIMEDOUT|EPIPE|socket|NoConnection|connection (closed|not available)/i.test(msg);
+}
+
+export const RETRY_DELAYS_MS = [5000, 20000, 60000];
+
+async function withRetry<T>(fn: () => Promise<T>, signal?: AbortSignal, delays = RETRY_DELAYS_MS): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (attempt >= delays.length || !isThrottleError(e) || signal?.aborted) throw e;
+      await new Promise((r) => setTimeout(r, delays[attempt]));
+    }
+  }
 }
 
 function getCheckpoint(db: Db, accountId: number, mailbox: string) {
@@ -110,16 +135,28 @@ export async function syncAccount(db: Db, account: AccountRow, client: MailClien
       if (lastUid > 0) query = { uid: `${lastUid + 1}:*` };
       else if (account.backfill_days > 0) query = { since: new Date(Date.now() - account.backfill_days * 86400000) };
       else query = { since: new Date(new Date(account.created_at).getTime() - 86400000) };
-      const found = (await client.search(query, { uid: true })) || [];
+      const found = (await withRetry(() => client.search(query, { uid: true }), opts.signal)) || [];
       const uids = found.filter((u) => u > lastUid).sort((a, b) => a - b);
       if (!cp || cp.uid_validity !== uv) setCheckpoint(db, account.id, mailbox, uv, lastUid);
       for (let i = 0; i < uids.length; i += batchSize) {
         if (opts.signal?.aborted) break;
         const batch = uids.slice(i, i + batchSize);
-        const envs = await client.fetchAll(batch.join(','), { uid: true, envelope: true, internalDate: true }, { uid: true });
+        const envs = await withRetry(() => client.fetchAll(batch.join(','), { uid: true, envelope: true, internalDate: true }, { uid: true }), opts.signal);
         const wanted = envs.filter(isLikelyRetail).map((m) => m.uid);
         const sources = new Map<number, FetchedMessage>();
-        if (wanted.length) for (const m of await client.fetchAll(wanted.join(','), { uid: true, source: true, internalDate: true }, { uid: true })) sources.set(m.uid, m);
+        // Bodies are pulled in small chunks so a large backlog doesn't trip the provider's bandwidth throttling.
+        for (let j = 0; j < wanted.length; j += SOURCE_CHUNK) {
+          const chunk = wanted.slice(j, j + SOURCE_CHUNK);
+          for (const m of await withRetry(() => client.fetchAll(chunk.join(','), { uid: true, source: true, internalDate: true }, { uid: true }), opts.signal)) sources.set(m.uid, m);
+        }
+        // A throttled server can return fewer bodies than asked for. Retry those one by one, and never
+        // move the checkpoint past a message we wanted but could not download.
+        for (const uid of wanted) {
+          if (sources.get(uid)?.source) continue;
+          const [m] = await withRetry(() => client.fetchAll(String(uid), { uid: true, source: true, internalDate: true }, { uid: true }), opts.signal);
+          if (m?.source) sources.set(uid, m);
+          else throw new RetryableSyncError(`message ${uid} could not be downloaded; will retry next sync`);
+        }
         for (const uid of batch) {
           if (opts.signal?.aborted) break;
           summary.scanned++;
@@ -148,7 +185,8 @@ export async function syncAccount(db: Db, account: AccountRow, client: MailClien
     progress('done');
   } catch (e) {
     const msg = redact((e as Error).message ?? String(e), 300);
-    db.run("UPDATE email_accounts SET status = ?, last_error = ?, error_count = error_count + 1 WHERE id = ?", [/auth|login|credential|invalid_grant|AUTHENTICATIONFAILED/i.test(msg) ? 'needs_auth' : 'error', msg, account.id]);
+    const status = /auth|login|credential|invalid_grant|AUTHENTICATIONFAILED/i.test(msg) ? 'needs_auth' : e instanceof RetryableSyncError || isThrottleError(e) ? 'throttled' : 'error';
+    db.run('UPDATE email_accounts SET status = ?, last_error = ?, error_count = error_count + 1 WHERE id = ?', [status, msg, account.id]);
     progress('error', { message: msg });
     throw e;
   } finally {

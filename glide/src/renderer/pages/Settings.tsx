@@ -183,7 +183,7 @@ function ShippingSettings() {
   const act = useAction();
   return (
     <Section title="Carrier tracking APIs">
-      <p className="text-sm text-ink3">Without carrier credentials, tracking comes from shipping emails only. With them, GLIDE polls the official APIs every few hours for undelivered packages. GLIDE never invents milestones or ETAs.</p>
+      <p className="text-sm text-ink3">Without an API, tracking comes from retailer shipping emails plus UPS / FedEx / USPS notification emails in your inboxes. Add a free 17TRACK key (one key covers every carrier) or a carrier's own API and GLIDE checks every undelivered package for shipped → out for delivery → delivered (hourly once it's out for delivery). GLIDE never invents milestones or ETAs.</p>
       {data?.map((p) => (
         <div key={p.id} className="flex items-center justify-between gap-3 rounded-xl border border-line bg-bg2/40 p-3">
           <div>
@@ -197,9 +197,9 @@ function ShippingSettings() {
           </div>
         </div>
       ))}
-      <Modal open={!!edit} onClose={() => setEdit(null)} title={`${edit?.toUpperCase()} credentials`} footer={<Button variant="primary" onClick={async () => { await act(() => call('shipping.saveProvider', edit!, edit === 'dhl' ? { apiKey: f.apiKey } : { clientId: f.clientId, clientSecret: f.clientSecret }), 'Saved'); setEdit(null); refetch(); }}>Save</Button>}>
-        {edit === 'dhl' ? (
-          <Field label="DHL API key"><Input type="password" value={f.apiKey} onChange={(e) => setF({ ...f, apiKey: e.target.value })} /></Field>
+      <Modal open={!!edit} onClose={() => setEdit(null)} title={`${edit?.toUpperCase()} credentials`} footer={<Button variant="primary" onClick={async () => { await act(() => call('shipping.saveProvider', edit!, edit === 'dhl' || edit === '17track' ? { apiKey: f.apiKey } : { clientId: f.clientId, clientSecret: f.clientSecret }), 'Saved'); setEdit(null); refetch(); }}>Save</Button>}>
+        {edit === 'dhl' || edit === '17track' ? (
+          <Field label={edit === '17track' ? '17TRACK API key (Security key from api.17track.net)' : 'DHL API key'}><Input type="password" value={f.apiKey} onChange={(e) => setF({ ...f, apiKey: e.target.value })} /></Field>
         ) : (
           <div className="space-y-3">
             <Field label="Client ID"><Input value={f.clientId} onChange={(e) => setF({ ...f, clientId: e.target.value })} /></Field>

@@ -83,10 +83,12 @@ const adapters: RetailerAdapter[] = RETAILERS.filter((r) => r.id !== 'custom').m
   }
   if (meta.id === 'shopify') {
     // Shopify stores send from their own domains; recognise them by markup instead.
+    // Capped below a sender-domain match (10) so a named retailer that happens to be hosted on Shopify
+    // (e.g. Mattel Creations) is always labelled as itself; "Shopify" is only the fallback for unnamed stores.
     a.detect = (_env, doc) => {
       let s = 0;
       for (const re of meta.brandMarkers) if (re.test(doc.haystack)) s += 4;
-      return s;
+      return Math.min(s, 8);
     };
   }
   if (meta.id === 'amazon') {

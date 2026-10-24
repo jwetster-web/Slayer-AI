@@ -7,6 +7,7 @@ import { useAction, useQuery } from '../lib/hooks';
 import { useStore } from '../lib/store';
 import { CsvImport } from '../components/CsvImport';
 import { Aurora, ParticleField } from '../components/fx';
+import { WindowControls } from '../components/Shell';
 import { AddAccount, ImportProgress } from './Accounts';
 import { Badge, Button, Card, Field, Input, cx } from '../components/ui';
 
@@ -33,7 +34,9 @@ export function Setup() {
     <div className="relative flex h-full overflow-hidden bg-bg">
       <Aurora />
       <ParticleField density={0.00012} />
-      <div className="drag-region absolute inset-x-0 top-0 h-8" />
+      <div className="drag-region absolute inset-x-0 top-0 z-20 flex h-12 items-center justify-end pr-2">
+        <WindowControls className="border-l-0" />
+      </div>
       <aside className="relative z-10 hidden w-[280px] shrink-0 flex-col border-r border-line bg-bg2/40 p-7 backdrop-blur-xl lg:flex">
         <div className="mb-10 flex items-center gap-3">
           <div className="grid size-11 place-items-center rounded-xl bg-gradient-to-br from-accent via-violet to-magenta font-display text-xl font-bold text-white shadow-[0_0_28px_-4px_var(--g-accent)]">G</div>

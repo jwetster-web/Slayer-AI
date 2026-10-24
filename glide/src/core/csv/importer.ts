@@ -24,7 +24,7 @@ export type Mapping = Partial<Record<Field, string>>;
 const ALIASES: Record<Field, string[]> = {
   discordId: ['discordid', 'discorduserid', 'userid', 'memberid', 'discordidnumber', 'snowflake'],
   discordUsername: ['discord', 'discordusername', 'discordname', 'username', 'discordtag', 'member', 'membername', 'user'],
-  profileName: ['profilename', 'profile', 'profiletitle', 'name', 'profileid'],
+  profileName: ['profilename', 'profile', 'profiletitle', 'name', 'profileid', 'fullname', 'recipient', 'recipientname', 'shippingname', 'customername', 'shiptoname'],
   email: ['email', 'emailaddress', 'mail', 'accountemail', 'shippingemail', 'profileemail'],
   firstName: ['firstname', 'shippingfirstname', 'fname', 'first', 'givenname'],
   lastName: ['lastname', 'shippinglastname', 'lname', 'last', 'surname', 'familyname'],
@@ -74,6 +74,14 @@ function luhn(d: string): boolean {
   return sum % 10 === 0;
 }
 
+/** Trims a cell, collapses stray tabs/spaces and unwraps Excel text guards such as ="34476" (keeps ZIP leading zeros). */
+export function cleanCell(v: unknown): string {
+  let t = (v ?? '').toString().trim();
+  const guarded = t.match(/^="(.*)"$/s);
+  if (guarded) t = guarded[1].replace(/""/g, '"').trim();
+  return t.replace(/[\t ]+/g, ' ');
+}
+
 export interface ParsedCsv {
   headers: string[];
   rows: Record<string, string>[];
@@ -100,11 +108,11 @@ export function parseCsv(text: string, preset?: string): ParsedCsv {
   headers = headers.filter((h) => !droppedSet.has(h));
   const rows = res.data.map((r) => {
     const o: Record<string, string> = {};
-    for (const h of headers) o[h] = (r[h] ?? '').toString().trim();
+    for (const h of headers) o[h] = cleanCell(r[h]);
     return o;
   });
   const lower = headers.map((h) => h.toLowerCase());
-  const detectedPreset = preset ?? (lower.includes('shipping first name') && lower.includes('profile name') ? 'valor' : lower.includes('address line 1') && lower.includes('profile') ? 'sniped' : lower.includes('discordid') || lower.includes('discord id') ? 'pokeslayerz' : null);
+  const detectedPreset = preset ?? (lower.includes('shipping first name') && lower.includes('profile name') ? 'valor' : lower.includes('address line 1') && lower.includes('profile') ? 'sniped' : lower.includes('discordid') || lower.includes('discord id') || (lower.includes('discord_username') && lower.includes('full_name')) ? 'pokeslayerz' : null);
   const mapping = autoMap(headers, detectedPreset ?? undefined);
   return { headers, rows, dropped, detectedPreset, mapping, kind: mapping.orderNumber ? 'orders' : 'profiles' };
 }
@@ -135,7 +143,7 @@ export function retailerFromText(t: string): RetailerId {
     if (/\b(de|germany|deutschland)\b/.test(s)) return 'pokemoncenter_de';
     return 'pokemoncenter_us';
   }
-  const table: [RegExp, RetailerId][] = [[/target/, 'target'], [/walmart/, 'walmart'], [/amazon/, 'amazon'], [/best\s*buy|bestbuy/, 'bestbuy'], [/costco/, 'costco'], [/sam'?s/, 'samsclub'], [/gamestop/, 'gamestop'], [/hot\s*topic/, 'hottopic'], [/barnes/, 'barnesnoble'], [/macy/, 'macys'], [/lego/, 'lego'], [/shopify/, 'shopify']];
+  const table: [RegExp, RetailerId][] = [[/target/, 'target'], [/walmart/, 'walmart'], [/amazon/, 'amazon'], [/best\s*buy|bestbuy/, 'bestbuy'], [/costco/, 'costco'], [/sam'?s/, 'samsclub'], [/gamestop/, 'gamestop'], [/hot\s*topic/, 'hottopic'], [/barnes/, 'barnesnoble'], [/macy/, 'macys'], [/lego/, 'lego'], [/mattel/, 'mattel'], [/shopify/, 'shopify']];
   for (const [re, id] of table) if (re.test(s)) return id;
   return 'custom';
 }
@@ -186,7 +194,8 @@ export function previewImport(db: Db, csv: ParsedCsv, mapping: Mapping, kind = c
     if (!discordId && !username) issues.push('missing Discord ID/username');
     if (!pname && !email) issues.push('missing profile name or email');
     if (discordId && !/^\d{15,22}$/.test(discordId)) issues.push('Discord ID is not a valid snowflake');
-    const dupKey = `${discordId || username}|${pname.toLowerCase()}`;
+    // One member can have several rows for the same name at different addresses; only exact repeats are duplicates.
+    const dupKey = `${discordId || username}|${pname.toLowerCase()}|${val(row, mapping, 'address1').toLowerCase()}|${val(row, mapping, 'address2').toLowerCase()}|${val(row, mapping, 'zip')}`;
     if (seen.has(dupKey)) {
       out.push({ index: i, action: 'skip', summary: `${pname} (duplicate row in file)`, issues: ['duplicate row'], suggestions });
       continue;

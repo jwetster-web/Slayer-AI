@@ -557,4 +557,25 @@ CREATE TABLE secrets (
 );
 `,
   },
+  {
+    // Mail-detection fixes (relay senders, wider confirmation subjects, Mattel Creations):
+    // relabel existing rows and rescan each inbox's backfill window once.
+    version: 2,
+    sql: `
+INSERT OR IGNORE INTO retailers (id, name, short_name, region, currency, color) VALUES ('mattel', 'Mattel Creations', 'Mattel', 'US', 'USD', '#e4002b');
+UPDATE orders SET retailer_id = 'mattel' WHERE retailer_id = 'shopify' AND order_number LIKE 'CHP%';
+UPDATE source_messages SET retailer_id = 'mattel' WHERE retailer_id = 'shopify' AND lower(from_addr) LIKE '%mattel%';
+
+-- Orders whose "number" has no digit (e.g. "HAS" from "Order # has shipped") are parse errors: drop them and re-read their mail.
+CREATE TEMP TABLE bogus_orders AS SELECT id FROM orders WHERE order_number NOT GLOB '*[0-9]*';
+UPDATE source_messages SET duplicate_of_id = NULL WHERE duplicate_of_id IN (SELECT id FROM source_messages WHERE order_id IN (SELECT id FROM bogus_orders));
+DELETE FROM source_messages WHERE order_id IN (SELECT id FROM bogus_orders);
+DELETE FROM orders WHERE id IN (SELECT id FROM bogus_orders);
+DROP TABLE bogus_orders;
+
+UPDATE source_messages SET duplicate_of_id = NULL WHERE duplicate_of_id IN (SELECT id FROM source_messages WHERE uid IS NOT NULL AND order_id IS NULL AND parse_status IN ('ignored', 'failed'));
+DELETE FROM source_messages WHERE uid IS NOT NULL AND order_id IS NULL AND parse_status IN ('ignored', 'failed');
+UPDATE sync_checkpoints SET last_uid = 0;
+`,
+  },
 ];
