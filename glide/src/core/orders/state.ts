@@ -33,6 +33,8 @@ export function deriveState(
   items: Item[],
   packages: { status: PackageStatus }[],
   refundedCents: number,
+  /** Furthest milestone seen in the order's emails; used only when there are no line items or packages to go by. */
+  milestone: 'shipped' | 'out_for_delivery' | 'delivered' | null = null,
 ): DerivedState {
   const units = items.reduce((s, i) => s + i.quantity, 0);
   const canceledUnits = items.reduce((s, i) => s + i.canceled_qty, 0);
@@ -67,6 +69,8 @@ export function deriveState(
   } else if (delivered > 0) fulfillment = 'partially_delivered';
   else if (shipped > 0) fulfillment = shipped >= active ? 'shipped' : 'partially_shipped';
   else if (items.some((i) => i.backordered && i.quantity > i.canceled_qty)) fulfillment = 'backordered';
+  // e.g. Amazon/eBay "Delivered" emails for an order whose item list and tracking were never seen.
+  if (fulfillment === 'ordered' && units === 0 && !live.length && milestone) fulfillment = milestone;
 
   return { fulfillment, cancelState, financial, units, canceledUnits, canceledCents, refundedCents, netCents };
 }
@@ -86,7 +90,9 @@ export function recomputeOrder(db: Db, orderId: number): DerivedState {
   }
   const packages = db.all<{ status: PackageStatus }>('SELECT status FROM packages WHERE order_id = ?', [orderId]);
   const refunded = db.value<number>("SELECT COALESCE(SUM(amount_cents), 0) FROM payments WHERE order_id = ? AND kind = 'refund'", [orderId]) ?? 0;
-  const s = deriveState({ total_cents: total }, items, packages, refunded);
+  const kinds = new Set(db.all<{ kind: string }>('SELECT DISTINCT kind FROM order_events WHERE order_id = ?', [orderId]).map((r) => r.kind));
+  const milestone = kinds.has('delivery') ? 'delivered' : kinds.has('out_for_delivery') ? 'out_for_delivery' : kinds.has('shipping') ? 'shipped' : null;
+  const s = deriveState({ total_cents: total }, items, packages, refunded, milestone);
   db.run(
     `UPDATE orders SET fulfillment_status = ?, cancel_state = ?, financial_status = ?, units = ?, canceled_units = ?,
        canceled_cents = ?, refunded_cents = ?, net_cents = ? WHERE id = ?`,

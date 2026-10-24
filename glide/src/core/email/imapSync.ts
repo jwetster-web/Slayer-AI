@@ -59,7 +59,7 @@ export interface AccountRow {
   created_at: string;
 }
 
-const RETAIL_DOMAINS = [...RETAILERS.flatMap((r) => r.senderDomains), 'ups.com', 'fedex.com', 'usps.com', 'dhl.com', 'ontrac.com', 'lasership.com'];
+const RETAIL_DOMAINS = [...RETAILERS.flatMap((r) => r.senderDomains), 'ups.com', 'fedex.com', 'usps.com', 'dhl.com', 'ontrac.com', 'lasership.com', 'fetchpackage.com', 'luxerone.com', 'parcelpending.com'];
 const SUBJECT_HINT = /\b(fwd?|fw|wg|tr)\s*:|forward|order|shipped|shipping|shipment|deliver|on (its|the) way|arriv|package|parcel|pick\s*up|cancel+ed|refund|tracking|receipt|purchase|confirm|thank(s| you) for|bestell|versand|commande|review/i;
 
 export function isLikelyRetail(m: FetchedMessage): boolean {
@@ -156,7 +156,9 @@ export async function syncAccount(db: Db, account: AccountRow, client: MailClien
         if (opts.signal?.aborted) break;
         const batch = uids.slice(i, i + batchSize);
         const envs = await withRetry(() => client.fetchAll(batch.join(','), { uid: true, envelope: true, internalDate: true }, { uid: true }), opts.signal);
-        const wanted = envs.filter(isLikelyRetail).map((m) => m.uid);
+        // Messages already recorded (e.g. during a rescan) are not downloaded again.
+        const known = new Set(db.all<{ uid: number }>(`SELECT uid FROM source_messages WHERE account_id = ? AND mailbox = ? AND uid_validity = ? AND uid IN (${batch.map(() => '?').join(',')})`, [account.id, mailbox, uv, ...batch]).map((r) => r.uid));
+        const wanted = envs.filter((m) => !known.has(m.uid) && isLikelyRetail(m)).map((m) => m.uid);
         const sources = new Map<number, FetchedMessage>();
         // Bodies are pulled in small chunks so a large backlog doesn't trip the provider's bandwidth throttling.
         for (let j = 0; j < wanted.length; j += SOURCE_CHUNK) {

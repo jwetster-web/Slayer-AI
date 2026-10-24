@@ -140,8 +140,8 @@ const QTY_RE = /\b(?:qty|quantity|menge|anzahl|quantit[ée]|cantidad)\s*[:.]?\s*
 const QTY_X_RE = /(?:^|\s)(\d{1,3})\s*[x×]\s+\S|(?:^|\s)[x×]\s*(\d{1,3})\b/i;
 const SKU_RE = /\b(?:sku|item\s*(?:#|no\.?|number)|dpci|tcin|model|artikel(?:nummer)?|art\.?-?nr\.?|product\s*(?:#|id|code)|style)\s*[:#]?\s*([A-Z0-9][A-Z0-9-]{3,24})\b/i;
 const UPC_RE = /\b(?:upc|ean|gtin)\s*[:#]?\s*(\d{12,14})\b/i;
-const NOT_TITLE = /^(qty|quantity|price|each|item|items|total|subtotal|sku|upc|sold by|ships? from|shipped by|seller|status|color|size|style|view|track|details|buy again|write a review|order|return|returns|shipping|tax|delivery|arrives?|estimated|free|menge|preis|anzahl|in stock|preorder)\b/i;
-const IMG_SKIP = /logo|spacer|pixel|tracking|beacon|icon|badge|star|rating|social|facebook|twitter|instagram|youtube|tiktok|apple-?store|google-?play|banner|header|footer|divider|arrow|1x1|blank\.gif/i;
+const NOT_TITLE = /^(see (all|more)|view all|show (all|more)|\d+\s+items?$|qty|quantity|price|each|item|items|total|subtotal|sku|upc|sold by|ships? from|shipped by|seller|status|color|size|style|view|track|details|buy again|write a review|order|return|returns|shipping|tax|delivery|arrives?|estimated|free|menge|preis|anzahl|in stock|preorder)\b/i;
+const IMG_SKIP = /logo|spacer|gray-bag|placeholder|no[-_]?image|default[-_]image|pixel|tracking|beacon|icon|badge|star|rating|social|facebook|twitter|instagram|youtube|tiktok|apple-?store|google-?play|banner|header|footer|divider|arrow|1x1|blank\.gif/i;
 const STOP_BLOCK = /\b(sub-?total|order\s+total|grand\s+total|ship(ping)?\s+to|shipping\s+address|billing\s+address|payment\s+method|order\s+summary|order\s*(number|no\.?|#)|tracking\s*(number|#)|bestellnummer)\b/i;
 /** Headline sentences ("We're sorry, your order has been canceled.") are not product names. */
 const SENTENCE = /\b(your|we|we're|we've|has been|have been|thank|sorry|below|click|please)\b.*[.!]$/i;
@@ -279,6 +279,43 @@ export function extractItemsFromHeaderTables(root: HTMLElement, currency: string
     }
   }
   return out;
+}
+
+const altTokens = (t: string) => [
+  ...new Set(
+    t
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/^(quantity|qty)\s*\d+\s*(items?|x)?\s*/, '')
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w.length > 1),
+  ),
+];
+
+/**
+ * Fills in missing item images from <img> tags whose alt/title text names the item
+ * (Walmart: alt="quantity 2 item One Piece…", Shopify/Klaviyo: alt="<product title>").
+ */
+export function attachAltImages(root: HTMLElement, items: ParsedItem[]): ParsedItem[] {
+  if (items.every((i) => i.imageUrl)) return items;
+  const imgs = root
+    .querySelectorAll('img')
+    .map((img) => ({ src: img.getAttribute('src') ?? img.getAttribute('data-src') ?? '', words: altTokens(`${img.getAttribute('alt') ?? ''} ${img.getAttribute('title') ?? ''}`) }))
+    .filter((i) => /^(https?:|cid:|data:image)/i.test(i.src) && !IMG_SKIP.test(i.src) && i.words.length >= 2);
+  return items.map((it) => {
+    if (it.imageUrl) return it;
+    const want = altTokens(it.title);
+    if (want.length < 2) return it;
+    let best: { src: string; score: number } | null = null;
+    for (const img of imgs) {
+      const have = new Set(img.words);
+      const hit = want.filter((w) => have.has(w)).length;
+      const score = hit / Math.max(want.length, img.words.length);
+      if (score >= 0.6 && (!best || score > best.score)) best = { src: img.src, score };
+    }
+    return best ? { ...it, imageUrl: best.src } : it;
+  });
 }
 
 export function extractItemsFromHtml(root: HTMLElement, currency: string): ParsedItem[] {

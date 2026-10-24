@@ -2,7 +2,7 @@
 // parse, and apply to orders. Safe to call repeatedly for the same message.
 
 import { gzipSync, gunzipSync } from 'node:zlib';
-import { DEFAULT_SETTINGS, type AppSettings, type EmailEnvelope, type UnwrappedEmail } from '../../shared/types';
+import { DEFAULT_SETTINGS, type AppSettings, type EmailEnvelope, type ParsedOrderEmail, type UnwrappedEmail } from '../../shared/types';
 import { redact } from '../audit';
 import { now, type Db } from '../db/database';
 import { EventSink } from '../events';
@@ -10,7 +10,7 @@ import { applyParsedEmail } from '../orders/ingest';
 import { parseRetailEmail, type CustomTemplate, type ParseOutcome } from '../parsing/adapters';
 import { domainOf } from '../retailers/registry';
 import type { DataCipher } from '../secrets';
-import { applyCarrierUpdate, parseCarrierEmail, type CarrierUpdate } from '../tracking/carrierEmail';
+import { applyCarrierUpdate, carrierOfSender, parseCarrierEmail, type CarrierUpdate } from '../tracking/carrierEmail';
 import { unwrapForwarded } from './forwarded';
 import { parseMime } from './mime';
 
@@ -82,6 +82,8 @@ export async function processRawMessage(deps: ProcessDeps, raw: Buffer, ref: Mes
   }
   // Not a retailer email: it may be a carrier notice (UPS/FedEx/USPS…) about a package we already track.
   let carrierUpdate: CarrierUpdate | null = null;
+  // Carrier / package-service mail is kept even when it can't be applied yet, so it can be reviewed and reprocessed.
+  const fromCarrier = outcome.status === 'ignored' && !!inner && !!carrierOfSender(inner.from);
   if (outcome.status === 'ignored' && inner) {
     try {
       carrierUpdate = parseCarrierEmail(inner);
@@ -93,7 +95,7 @@ export async function processRawMessage(deps: ProcessDeps, raw: Buffer, ref: Mes
   const rec = receivedAt ?? now();
   return db.tx(() => {
     if (alreadyProcessed(db, ref)) return { status: 'already_processed' as const };
-    const isRetail = outcome.status !== 'ignored' || !!carrierUpdate;
+    const isRetail = outcome.status !== 'ignored' || !!carrierUpdate || fromCarrier;
     const retailerId = outcome.status === 'parsed' ? outcome.result.retailer : outcome.retailer ?? null;
     const type = outcome.status === 'parsed' ? outcome.result.type : outcome.type ?? 'unknown';
     // Non-retail mail keeps only what is needed for idempotency: no subject, sender domain only.
@@ -165,4 +167,21 @@ export function readRawMessage(db: Db, sourceMessageId: number, cipher?: DataCip
     buf = cipher.decrypt(buf);
   }
   return gunzipSync(buf);
+}
+
+/** Re-parses a stored raw message with the current parsers (for repairs); returns every parsed candidate. */
+export async function reparseStored(db: Db, sourceMessageId: number, cipher?: DataCipher | null): Promise<ParsedOrderEmail[]> {
+  const raw = readRawMessage(db, sourceMessageId, cipher);
+  if (!raw) return [];
+  try {
+    const mime = await parseMime(raw);
+    const out: ParsedOrderEmail[] = [];
+    for (const c of candidates(mime.envelope, mime.attached)) {
+      const o = parseRetailEmail(c, loadTemplates(db));
+      if (o.status === 'parsed') out.push(o.result);
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }

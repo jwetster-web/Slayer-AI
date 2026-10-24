@@ -20,6 +20,8 @@ const CARRIER_DOMAINS: [Carrier, string[]][] = [
   ['dhl', ['dhl.com', 'dhl.de']],
   ['ontrac', ['ontrac.com']],
   ['lasership', ['lasership.com']],
+  // Package-receiving services (apartment lockers / concierge) that confirm hand-off by tracking number.
+  ['other', ['fetchpackage.com', 'luxerone.com', 'amazonhub.com', 'parcelpending.com']],
 ];
 
 export interface CarrierUpdate {

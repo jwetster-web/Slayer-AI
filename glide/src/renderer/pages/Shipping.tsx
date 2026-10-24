@@ -28,13 +28,20 @@ export function Shipping() {
   const n = (x: number) => formatNumber(x);
   return (
     <div>
-      <PageHeader eyebrow="Logistics" title="Shipping Tracker" subtitle="Packages from shipping emails, refreshed through official carrier APIs where you have configured credentials. Every status shows when it was last verified." right={
+      <PageHeader eyebrow="Logistics" title="Shipping Tracker" subtitle="Packages from shipping emails, refreshed through 17TRACK or carrier APIs where you have configured credentials. Every status shows when it was last verified." right={
         <>
           <Button icon={<Settings2 className="size-4" />} onClick={() => useStore.getState().navigate('settings', { settingsTab: 'shipping' })}>Carrier APIs ({configured}/{providers?.length ?? 4})</Button>
           <Button variant="primary" icon={<RefreshCw className="size-4" />} onClick={() => act(() => call('shipping.refresh'), 'Tracking refreshed')}>Refresh now</Button>
         </>
       } />
-      {configured === 0 && <div className="mb-4 rounded-xl border border-warn/30 bg-warn/10 p-3 text-sm text-warn">No carrier API is configured, so tracking comes from retailer emails only. Add UPS, FedEx, USPS or DHL developer credentials in Settings → Shipping for live carrier scans.</div>}
+      {configured === 0 && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warn/30 bg-warn/10 p-3 text-sm text-warn">
+          <span>
+            No tracking API is connected, so deliveries are only detected from emails (retailer "delivered" emails, UPS / FedEx / USPS notices, Fetch Package). Most retailers never email when a package is delivered{counts.in_transit ? ` — ${n(counts.in_transit)} packages are waiting on a delivery scan` : ''}. Add a free 17TRACK key to check every tracking number automatically.
+          </span>
+          <Button size="sm" variant="primary" onClick={() => useStore.getState().navigate('settings', { settingsTab: 'shipping' })}>Add tracking key</Button>
+        </div>
+      )}
       <div className="mb-4 grid gap-3 sm:grid-cols-3 xl:grid-cols-6">
         {COLS.map((c) => (
           <Card key={c.id} onClick={() => setTab(c.id)} className={`relative overflow-hidden p-4 ${tab === c.id ? 'border-accent/50' : ''}`}>

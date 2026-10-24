@@ -1,4 +1,4 @@
-import { Boxes, GitMerge, ImagePlus, Search, Star, X } from 'lucide-react';
+import { Boxes, GitMerge, ImagePlus, RefreshCw, Search, Star, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useEffect, useState } from 'react';
 import { formatCents, formatDate, formatNumber } from '../../shared/format';
@@ -15,9 +15,10 @@ export function Catalog() {
   const { data: info } = useQuery(() => call('app.info'), [], { live: false });
   const { data } = useQuery(() => call('products.list', { search: dq, category: cat || undefined, limit: 120, offset }), [dq, cat, offset]);
   useEffect(() => setOffset(0), [dq, cat]);
+  const act = useAction();
   return (
     <div>
-      <PageHeader eyebrow="Catalog" title="Product Catalog" subtitle="Products are identified by retailer SKU and UPC — never by fuzzy title matching — so an image always belongs to the exact product." />
+      <PageHeader eyebrow="Catalog" title="Product Catalog" subtitle="Products are identified by retailer SKU and UPC — never by fuzzy title matching — so an image always belongs to the exact product." right={<Button icon={<RefreshCw className="size-4" />} onClick={() => act(() => call('products.refreshImages'), 'Images refreshed')}>Refresh images</Button>} />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="relative min-w-[280px] flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink3" />

@@ -142,7 +142,12 @@ async function tick(force = false) {
   };
   if (!syncState.paused && due('sync', Math.max(30, s.pollIntervalSec) * 1000)) {
     lastRun.sync = t;
-    void once('sync', { type: 'syncAll' }).then(() => (syncState.lastSyncAt = new Date().toISOString()));
+    void once('sync', { type: 'syncAll' }).then(() => {
+      syncState.lastSyncAt = new Date().toISOString();
+      // New orders bring new product images; fetch them now instead of waiting for the 5-minute pass.
+      lastRun.images = Date.now();
+      void once('images', { type: 'cacheImages' });
+    });
   }
   if (due('images', 5 * 60000)) void once('images', { type: 'cacheImages' });
   if (due('tracking', 30 * 60000)) void once('tracking', { type: 'refreshTracking' });

@@ -6,6 +6,7 @@
 import type { MessageType, ParsedOrderEmail, RetailerId, UnwrappedEmail } from '../../shared/types';
 import { RETAILERS, domainMatches, domainOf, retailer, type RetailerMeta } from '../retailers/registry';
 import {
+  attachAltImages,
   classifyMessageType,
   extractAddress,
   extractCustomerEmail,
@@ -186,6 +187,7 @@ export function parseRetailEmail(env: UnwrappedEmail, templates: CustomTemplate[
   }
   let items = doc.root ? extractItemsFromHtml(doc.root, currency) : [];
   if (!items.length) items = extractItemsFromLines(doc.lines, currency);
+  if (doc.root) items = attachAltImages(doc.root, items);
 
   const ref = env.date ? new Date(env.date) : new Date();
   const tracking = ['shipping', 'out_for_delivery', 'delivery', 'order_update', 'delay', 'partial_cancellation'].includes(type)

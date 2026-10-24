@@ -190,7 +190,9 @@ export function createHandlers(ctx: HandlerContext) {
       const raw = readRawMessage(db(), sourceId, cur().cipher);
       if (!raw) return null;
       const m = await parseMime(raw);
-      return { html: m.envelope.html ?? null, text: m.envelope.text ?? null };
+      // Forwarded-as-attachment mail: show the original retailer email, not the forwarding wrapper.
+      const shown = m.attached.find((x) => x.html || x.text) ?? m.envelope;
+      return { html: shown.html ?? null, text: shown.text ?? null };
     },
     'orders.exportCsv': async (f: OrderFilter) => {
       const path = await saveDialog(`glide-orders-${new Date().toISOString().slice(0, 10)}.csv`, [{ name: 'CSV', extensions: ['csv'] }]);
@@ -402,6 +404,7 @@ export function createHandlers(ctx: HandlerContext) {
     // -- Shipping -----------------------------------------------------------
     'shipping.overview': () => shipmentOverview(db()),
     'shipping.refresh': () => ctx.runJob({ type: 'refreshTracking' }),
+    'products.refreshImages': () => ctx.runJob({ type: 'cacheImages' }),
     'shipping.providers': () => PROVIDERS.map((p) => ({ id: p.id, name: p.name, carriers: p.carriers, configured: cur().secrets.has(`tracking:${p.id}`) })),
     'shipping.saveProvider': (id: string, creds: ProviderCredentials | null) => {
       if (!PROVIDERS.some((p) => p.id === id)) throw new Error('Unknown provider');

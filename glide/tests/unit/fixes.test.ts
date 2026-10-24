@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { applyImport, cleanCell, parseCsv, previewImport } from '../../src/core/csv/importer';
 import { syncAccount, type FetchedMessage, type MailClient } from '../../src/core/email/imapSync';
-import { classifyMessageType, extractOrderNumber } from '../../src/core/parsing/extract';
+import { attachAltImages, classifyMessageType, extractItemsFromHtml, extractOrderNumber } from '../../src/core/parsing/extract';
+import { parseHtml } from '../../src/core/parsing/html';
+import { deriveState } from '../../src/core/orders/state';
+import { resolveProduct } from '../../src/core/products/catalog';
+import { borrowImagesByTitle } from '../../src/core/products/repair';
 import { parseRetailEmail } from '../../src/core/parsing/adapters';
 import { domainOf, unrelayAddress } from '../../src/core/retailers/registry';
 import { buildMime } from '../../src/core/sample/mime';
@@ -168,5 +172,52 @@ describe('second pass: All Mail, Pokémon Center, eBay, Sam\'s Club', () => {
     expect(classifyMessageType('Picked up at 11:47 am: items from order #8000000-70883055', [])).toBe('delivery');
     const r = parseRetailEmail({ from: 'no-reply@transaction.samsclub.com', to: ['me@example.com'], subject: 'Chloe, thanks for your curbside pickup order', text: "Sam's Club\nOrder #8000000-70883055\nTotal $120.00", date: '2026-10-20T16:00:00Z' } as never);
     expect(r.status === 'parsed' && r.result.orderNumber).toBe('8000000-70883055');
+  });
+});
+
+describe('product images and delivered status', () => {
+  it('takes item photos from alt text and skips placeholder bags', () => {
+    const html = `<html><body>
+      <table><tr><td><img src="https://target.scene7.com/is/image/Target/gray-bag?scl=1&fmt=png-alpha" width="80"></td><td>Pokémon TCG Elite Trainer Box</td><td>Qty: 1</td><td>$49.99</td></tr></table>
+      <img alt="quantity 2 item One Piece Card Game Gift Collection Heroines" title="One Piece Card Game Gift Collection Heroines" src="https://i5.walmartimages.com/seo/one-piece.jpeg" width="120">
+      <p>Order #1001 confirmed</p></body></html>`;
+    const root = parseHtml(html);
+    const items = attachAltImages(root, [
+      { title: 'One Piece Card Game Gift Collection Heroines', quantity: 2 },
+      { title: 'Pokémon TCG Elite Trainer Box', quantity: 1 },
+    ] as never);
+    expect(items[0].imageUrl).toBe('https://i5.walmartimages.com/seo/one-piece.jpeg');
+    expect(items[1].imageUrl).toBeUndefined();
+  });
+
+  it('marks an order delivered from a "Delivered" email even with no item list or tracking', () => {
+    expect(deriveState({ total_cents: 0 }, [], [], 0, 'delivered').fulfillment).toBe('delivered');
+    expect(deriveState({ total_cents: 0 }, [], [], 0, null).fulfillment).toBe('ordered');
+  });
+
+  it('reuses an image only for the identical product title', () => {
+    const db = memDb();
+    const a = resolveProduct(db, 'target', { title: 'Pokémon Trading Card Game: 30th Celebration Booster Bundle', quantity: 1, imageUrl: 'https://img.example/a.jpg' } as never);
+    const b = resolveProduct(db, 'pokemoncenter_us', { title: 'Pokémon TCG: 30th Celebration Booster Bundle', quantity: 1 } as never);
+    const c = resolveProduct(db, 'pokemoncenter_us', { title: 'Pokémon TCG: 30th Celebration Booster Bundle (6 Packs)', quantity: 1 } as never);
+    expect(borrowImagesByTitle(db)).toBe(1);
+    expect(db.value('SELECT primary_image_id IS NOT NULL FROM products WHERE id = ?', [b])).toBe(1);
+    expect(db.value('SELECT primary_image_id IS NULL FROM products WHERE id = ?', [c])).toBe(1);
+    expect(a).not.toBe(b);
+  });
+
+  it('applies Fetch Package "delivered" notices to the tracked package', async () => {
+    const db = memDb();
+    const ship = renderSampleEmail({ retailer: 'target', type: 'shipping', orderNumber: '912003760125368', date: new Date('2026-10-20T16:00:00Z'), to: 'buyer@example.com', items: item, address: addr, taxCents: 0, shippingCents: 0, tracking: [{ number: '1ZWY06570307748706', carrier: 'ups' }] });
+    await ingest(db, ship.raw);
+    const fetchMail = buildMime({ from: 'notifications@fetchpackage.com', to: 'me@example.com', subject: 'Mission accomplished, your package has been delivered!', date: new Date('2026-10-22T18:00:00Z'), text: 'Carrier: UPS\nTracking number: 1ZWY06570307748706' });
+    await ingest(db, fetchMail);
+    expect(db.value('SELECT status FROM packages')).toBe('delivered');
+    expect(db.value('SELECT fulfillment_status FROM orders')).toBe('delivered');
+  });
+
+  it('drops "See all" and "3 items" as product titles', () => {
+    const html = '<html><body><table><tr><td><a href="https://walmart.com/x">See all</a></td><td>Qty 3</td><td>$10.00</td></tr></table></body></html>';
+    expect(extractItemsFromHtml(parseHtml(html), 'USD').map((i) => i.title)).not.toContain('See all');
   });
 });

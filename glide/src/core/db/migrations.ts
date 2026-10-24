@@ -578,4 +578,13 @@ DELETE FROM source_messages WHERE uid IS NOT NULL AND order_id IS NULL AND parse
 UPDATE sync_checkpoints SET last_uid = 0;
 `,
   },
+  {
+    // Pickup / package-service / carrier notices are now understood: re-check previously ignored mail once.
+    version: 3,
+    sql: `
+UPDATE source_messages SET duplicate_of_id = NULL WHERE duplicate_of_id IN (SELECT id FROM source_messages WHERE uid IS NOT NULL AND order_id IS NULL AND parse_status IN ('ignored', 'failed'));
+DELETE FROM source_messages WHERE uid IS NOT NULL AND order_id IS NULL AND parse_status IN ('ignored', 'failed');
+UPDATE sync_checkpoints SET last_uid = 0;
+`,
+  },
 ];

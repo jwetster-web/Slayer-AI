@@ -17,6 +17,7 @@ import { loadTemplates, processRawMessage, readRawMessage, type MessageRef } fro
 import { EventSink } from '../src/core/events';
 import { buildRecapData, type RecapOptions } from '../src/core/export/data';
 import { renderExport, renderMp4, setFontDir, type RenderRequest } from '../src/core/export/render';
+import { borrowImagesByTitle, imageRepairDone, repairProductImages } from '../src/core/products/repair';
 import { cacheProductImages, cacheFileName, httpImageFetcher } from '../src/core/products/images';
 import { generateSampleWorkspace } from '../src/core/sample/generator';
 import { DataCipher, SecretStore } from '../src/core/secrets';
@@ -195,7 +196,13 @@ async function handle(job: WorkerJob): Promise<unknown> {
     }
     case 'cacheImages': {
       let n = 0;
-      if (getSettings(db).fetchRemoteProductImages) n = await cacheProductImages(db, init.imageDir, httpImageFetcher, 60);
+      if (!imageRepairDone(db)) {
+        const r = await repairProductImages(db, cipher);
+        emit({ kind: 'log', level: 'info', message: `product image repair: ${JSON.stringify(r)}` });
+        n += r.recovered + r.removedJunk;
+      }
+      n += borrowImagesByTitle(db);
+      if (getSettings(db).fetchRemoteProductImages) n += await cacheProductImages(db, init.imageDir, httpImageFetcher, 120);
       await cacheMemberAvatars();
       if (n) changed('products', 'orders');
       return n;
