@@ -211,6 +211,27 @@ function startUpdater() {
   setInterval(check, 6 * 3600000);
 }
 
+// Opening the workspace can fail transiently (the database still held by a GLIDE that is closing after an
+// update, or a slow OS key store). Retry before giving up, and remember why, so the UI shows the problem
+// instead of the first-run setup.
+const startup = { error: null as string | null };
+async function openLastWorkspace(attempts = 6): Promise<boolean> {
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      if (!ws.current) await ws.openLast();
+      if (ws.current && !worker) await startWorker();
+      startup.error = null;
+      return true;
+    } catch (e) {
+      startup.error = (e as Error).message ?? String(e);
+      log(i === attempts ? 'error' : 'warn', `could not open last workspace (attempt ${i}/${attempts}): ${startup.error}`);
+      if (ws.current && !worker) ws.close();
+      if (i < attempts) await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
+  return false;
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1520,
@@ -268,6 +289,7 @@ app.whenReady().then(async () => {
     ws,
     runJob,
     restartWorker: startWorker,
+    startup: { error: () => startup.error, retry: () => openLastWorkspace(3) },
     window: () => win,
     fontDir: join(resourcesDir(), 'fonts'),
     sync: syncState,
@@ -298,12 +320,7 @@ app.whenReady().then(async () => {
     }
   });
 
-  try {
-    await ws.openLast();
-    await startWorker();
-  } catch (e) {
-    log('error', `could not open last workspace: ${(e as Error).message}`);
-  }
+  await openLastWorkspace();
   createWindow();
   startUpdater();
   setInterval(() => void tick(), 15000);

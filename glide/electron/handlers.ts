@@ -42,6 +42,7 @@ export interface HandlerContext {
   ws: WorkspaceManager;
   runJob: (job: WorkerJob) => Promise<unknown>;
   restartWorker: () => Promise<void>;
+  startup: { error(): string | null; retry(): Promise<boolean> };
   window: () => BrowserWindow | null;
   fontDir: string;
   sync: { paused: boolean; lastSyncAt: string | null; setPaused(p: boolean): void; trigger(): void };
@@ -111,6 +112,11 @@ export function createHandlers(ctx: HandlerContext) {
 
     // -- Workspaces ---------------------------------------------------------
     'workspace.list': () => ctx.ws.list(),
+    'workspace.startupError': () => ctx.startup.error(),
+    'workspace.retryOpen': async () => {
+      const ok = await ctx.startup.retry();
+      return ok && ctx.ws.current ? { ...ctx.ws.current.info, setupComplete: getMeta(db(), 'setup_complete') === '1' } : null;
+    },
     'workspace.current': () => (ctx.ws.current ? { ...ctx.ws.current.info, setupComplete: getMeta(db(), 'setup_complete') === '1' } : null),
     'workspace.create': async (name: string, sample: boolean, sampleOrders = 1000) => {
       const info = ctx.ws.create(name || (sample ? 'Sample Workspace' : 'PokeSlayerz'), sample);
