@@ -36,6 +36,8 @@ export const BUILTIN_RULES: RuleDef[] = [
   { key: 'G_parser_alert', name: 'Parser failure alert', description: 'When a retailer parser fails repeatedly, raise a diagnostics alert with a redacted example.', trigger: 'parser_failure', actions: [{ type: 'parser_failure_alert', threshold: 3 }], enabled: true },
   { key: 'H_new_order_admin', name: 'New order → admin channel', description: 'Post each successful checkout to the private admin channel.', trigger: 'order_created', actions: [{ type: 'discord_notify', channel: 'admin_channel' }], enabled: false },
   { key: 'I_delivered_dm', name: 'Delivered → member DM', description: 'DM the member when their package is delivered.', trigger: 'delivered', actions: [{ type: 'discord_notify', channel: 'member_dm' }], enabled: false },
+  { key: 'J_out_for_delivery_dm', name: 'Out for delivery → member DM', description: 'DM the member the morning their package is out for delivery.', trigger: 'out_for_delivery', actions: [{ type: 'discord_notify', channel: 'member_dm' }], enabled: false },
+  { key: 'K_shipping_admin', name: 'Shipping updates → admin channel', description: 'Post out-for-delivery and delivered updates for every order to the private admin channel.', trigger: 'delivered', triggers: ['out_for_delivery', 'delivered'], actions: [{ type: 'discord_notify', channel: 'admin_channel' }], enabled: false },
 ];
 
 export function seedAutomationRules(db: Db) {
@@ -82,8 +84,9 @@ export interface AutomationHooks {
 
 function notificationPayload(db: Db, e: DomainEvent, channel: 'admin_channel' | 'member_dm'): { target: string; payload: Record<string, unknown> } | null {
   if (!e.orderId) return null;
-  const o = db.get<{ order_number: string; retailer: string; total_cents: number; currency: string; units: number; member_id: number | null; discord_id: string | null; username: string | null }>(
-    `SELECT o.order_number, r.name AS retailer, o.total_cents, o.currency, o.units, o.member_id, m.discord_id, m.username
+  const o = db.get<{ order_number: string; retailer: string; total_cents: number; currency: string; units: number; member_id: number | null; discord_id: string | null; username: string | null; item: string | null }>(
+    `SELECT o.order_number, r.name AS retailer, o.total_cents, o.currency, o.units, o.member_id, m.discord_id, m.username,
+            (SELECT oi.title FROM order_items oi WHERE oi.order_id = o.id ORDER BY oi.line_total_cents DESC LIMIT 1) AS item
      FROM orders o JOIN retailers r ON r.id = o.retailer_id LEFT JOIN members m ON m.id = o.member_id WHERE o.id = ?`,
     [e.orderId],
   );
@@ -91,9 +94,9 @@ function notificationPayload(db: Db, e: DomainEvent, channel: 'admin_channel' | 
   if (channel === 'member_dm') {
     // DMs go only to the order's own member, identified by stable Discord ID.
     if (!o.discord_id) return null;
-    return { target: o.discord_id, payload: { event: e.kind, retailer: o.retailer, orderNumber: o.order_number, totalCents: o.total_cents, currency: o.currency, units: o.units, packageId: e.packageId ?? null } };
+    return { target: o.discord_id, payload: { event: e.kind, retailer: o.retailer, orderNumber: o.order_number, totalCents: o.total_cents, currency: o.currency, units: o.units, item: o.item, packageId: e.packageId ?? null } };
   }
-  return { target: 'admin', payload: { event: e.kind, retailer: o.retailer, orderNumber: o.order_number, totalCents: o.total_cents, currency: o.currency, units: o.units, member: o.username ?? 'Unassigned' } };
+  return { target: 'admin', payload: { event: e.kind, retailer: o.retailer, orderNumber: o.order_number, totalCents: o.total_cents, currency: o.currency, units: o.units, item: o.item, member: o.username ?? 'Unassigned' } };
 }
 
 export async function runAutomations(db: Db, events: DomainEvent[], settings: AppSettings, hooks: AutomationHooks = {}): Promise<number> {

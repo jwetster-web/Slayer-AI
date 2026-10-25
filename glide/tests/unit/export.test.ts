@@ -8,6 +8,7 @@ import { generateSampleWorkspace } from '../../src/core/sample/generator';
 import { buildRecapData } from '../../src/core/export/data';
 import { renderExport, setFontDir, buildSvg } from '../../src/core/export/render';
 import { TEMPLATES } from '../../src/core/export/templates';
+import { hsl } from '../../src/core/export/svg';
 import type { Db } from '../../src/core/db/database';
 
 const OUT = process.env.GLIDE_EXPORT_OUT;
@@ -81,4 +82,15 @@ describe('Cook Export Studio', () => {
     expect(gif.buffer.subarray(0, 6).toString()).toBe('GIF89a');
     if (OUT) writeFileSync(join(OUT, 'galactic.gif'), gif.buffer);
   }, 120000);
+  it('applies the Studio color slider and tile options', () => {
+    const d = buildRecapData(db, {}, getSettings(db), { imageDir: join(dir, 'images'), isSample: true });
+    const base = buildSvg(d, { template: 'wall', width: 1080, height: 1080, options: {} });
+    const tuned = buildSvg(d, { template: 'wall', width: 1080, height: 1080, options: { hue: 120, tileQtyBadge: false, tileGlow: false, stars: false, background: 'solid', tileRadius: 0 } });
+    expect(tuned).not.toBe(base);
+    expect(tuned).toContain(hsl(120, 90, 65));
+    expect(base.match(/fill="url\(#gTile\)"/g)?.length ?? 0).toBeGreaterThan(0);
+    expect(tuned).not.toContain('fill="url(#gTile)"');
+    expect(tuned).not.toMatch(/>×\d/);
+    expect(tuned).not.toContain('filter="url(#blurXL)"');
+  });
 });

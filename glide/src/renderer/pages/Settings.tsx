@@ -49,6 +49,7 @@ export function SettingsPage() {
           {tab === 'matching' && <MatchingSettings draft={draft} set={set} save={save} />}
           {tab === 'data' && <DataSettings draft={draft} set={set} save={save} />}
           {tab === 'parsers' && <ParserTemplates />}
+          {tab === 'about' && <Updates />}
           {tab === 'about' && <About />}
         </div>
       </div>
@@ -183,7 +184,7 @@ function ShippingSettings() {
   const act = useAction();
   return (
     <Section title="Carrier tracking APIs">
-      <p className="text-sm text-ink3">Without an API, tracking comes from retailer shipping emails plus UPS / FedEx / USPS notification emails in your inboxes. Add a free 17TRACK key (one key covers every carrier) or a carrier's own API and GLIDE checks every undelivered package for shipped → out for delivery → delivered (hourly once it's out for delivery). GLIDE never invents milestones or ETAs.</p>
+      <p className="text-sm text-ink3">Without an API, tracking comes from retailer shipping emails plus UPS / FedEx / USPS notification emails in your inboxes. Add a free Shippo API token (one token covers UPS, FedEx, USPS, DHL and more), a 17TRACK key, or a carrier's own API and GLIDE checks every undelivered package for shipped → out for delivery → delivered (hourly once it's out for delivery). GLIDE never invents milestones or ETAs.</p>
       {data?.map((p) => (
         <div key={p.id} className="flex items-center justify-between gap-3 rounded-xl border border-line bg-bg2/40 p-3">
           <div>
@@ -197,9 +198,9 @@ function ShippingSettings() {
           </div>
         </div>
       ))}
-      <Modal open={!!edit} onClose={() => setEdit(null)} title={`${edit?.toUpperCase()} credentials`} footer={<Button variant="primary" onClick={async () => { await act(() => call('shipping.saveProvider', edit!, edit === 'dhl' || edit === '17track' ? { apiKey: f.apiKey } : { clientId: f.clientId, clientSecret: f.clientSecret }), 'Saved'); setEdit(null); refetch(); }}>Save</Button>}>
-        {edit === 'dhl' || edit === '17track' ? (
-          <Field label={edit === '17track' ? '17TRACK API key (Security key from api.17track.net)' : 'DHL API key'}><Input type="password" value={f.apiKey} onChange={(e) => setF({ ...f, apiKey: e.target.value })} /></Field>
+      <Modal open={!!edit} onClose={() => setEdit(null)} title={`${edit?.toUpperCase()} credentials`} footer={<Button variant="primary" onClick={async () => { await act(() => call('shipping.saveProvider', edit!, edit === 'dhl' || edit === '17track' || edit === 'shippo' ? { apiKey: f.apiKey } : { clientId: f.clientId, clientSecret: f.clientSecret }), 'Saved'); setEdit(null); refetch(); }}>Save</Button>}>
+        {edit === 'dhl' || edit === '17track' || edit === 'shippo' ? (
+          <Field label={edit === 'shippo' ? 'Shippo live API token (shippo_live_…, from apps.goshippo.com → Settings → API)' : edit === '17track' ? '17TRACK API key (Security key from api.17track.net)' : 'DHL API key'}><Input type="password" value={f.apiKey} onChange={(e) => setF({ ...f, apiKey: e.target.value })} /></Field>
         ) : (
           <div className="space-y-3">
             <Field label="Client ID"><Input value={f.clientId} onChange={(e) => setF({ ...f, clientId: e.target.value })} /></Field>
@@ -331,3 +332,28 @@ function About() {
 }
 
 export { Textarea };
+
+function Updates() {
+  const { data, refetch } = useQuery(() => call('updates.state'), []);
+  const [checking, setChecking] = useState(false);
+  const act = useAction();
+  const label: Record<string, string> = {
+    idle: 'Not checked yet', checking: 'Checking…', available: `Version ${data?.version} found — downloading`, downloading: `Downloading ${data?.version ?? ''} (${data?.percent ?? 0}%)`,
+    ready: `Version ${data?.version} downloaded — restart to install`, none: 'You have the latest version', error: `Update check failed: ${data?.error ?? ''}`,
+  };
+  return (
+    <Section title="Updates">
+      <p className="text-sm text-ink3">GLIDE checks GitHub Releases for new versions when it starts and every 6 hours, downloads them in the background and installs them the next time it restarts.</p>
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-bg2/40 p-3 text-sm">
+        <div>
+          <div className="text-ink">Installed version <span className="font-mono">{data?.current ?? '—'}</span></div>
+          <div className="text-xs text-ink3">{data?.packaged === false ? 'Development build — updates are only checked in the installed app.' : label[data?.status ?? 'idle']}</div>
+        </div>
+        <div className="flex gap-2">
+          {data?.status === 'ready' && <Button variant="primary" onClick={() => void call('updates.install')}>Restart to update</Button>}
+          <Button busy={checking} onClick={async () => { setChecking(true); await act(() => call('updates.check')); setChecking(false); refetch(); }}>Check for updates</Button>
+        </div>
+      </div>
+    </Section>
+  );
+}

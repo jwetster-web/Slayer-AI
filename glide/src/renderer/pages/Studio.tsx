@@ -33,7 +33,11 @@ export function Studio() {
   const [range, setRange] = useState<RangeId>('today');
   const [custom, setCustom] = useState<{ from?: string; to?: string }>({});
   const [dropWindow, setDropWindow] = useState({ from: '', to: '' });
-  const [opts, setOpts] = useState({ headline: 'net' as 'net' | 'gross', transparent: false, watermark: 'bottom-right', maxProducts: 0, showTitles: true, title: '', masked: false, dateLabel: '' });
+  const [opts, setOpts] = useState({
+    headline: 'net' as 'net' | 'gross', transparent: false, watermark: 'bottom-right', maxProducts: 0, showTitles: true, title: '', masked: false, dateLabel: '',
+    hue: null as number | null, background: 'auto' as 'auto' | 'galaxy' | 'aurora' | 'holo' | 'solid', stars: true, gridLines: true, glow: 1,
+    tileRadius: 1, tileTextScale: 1, tileTitleLines: 2, tileQtyBadge: true, tileGlow: true, tileBorder: true,
+  });
   const [format, setFormat] = useState<Format>('png');
   const [project, setProject] = useState<CustomProject | null>(null);
   const [presetName, setPresetName] = useState('');
@@ -56,7 +60,11 @@ export function Studio() {
       template: tpl,
       width: size.w,
       height: size.h,
-      options: { headline: opts.headline, transparent: opts.transparent, watermark: opts.watermark as never, maxProducts: opts.maxProducts || undefined, showTitles: opts.showTitles, title: opts.title || undefined },
+      options: {
+        headline: opts.headline, transparent: opts.transparent, watermark: opts.watermark as never, maxProducts: opts.maxProducts || undefined, showTitles: opts.showTitles, title: opts.title || undefined,
+        hue: opts.hue ?? undefined, background: opts.background, stars: opts.stars, gridLines: opts.gridLines, glow: opts.glow,
+        tileRadius: opts.tileRadius, tileTextScale: opts.tileTextScale, tileTitleLines: opts.tileTitleLines, tileQtyBadge: opts.tileQtyBadge, tileGlow: opts.tileGlow, tileBorder: opts.tileBorder,
+      },
       custom: tpl === 'custom' ? project ?? undefined : undefined,
     }),
     [tpl, size, opts, project],
@@ -101,6 +109,8 @@ export function Studio() {
     }
   };
 
+  const settings = useStore((st) => st.settings);
+  const brandHue = useMemo(() => hueOf(settings?.accentColor ?? '#7c5cff'), [settings?.accentColor]);
   const tdef = templates?.find((t) => t.id === tpl);
   const k = preview?.kpis;
 
@@ -178,6 +188,53 @@ export function Studio() {
             {tdef?.supportsTransparent && <Toggle checked={opts.transparent} onChange={(v) => setOpts({ ...opts, transparent: v })} label="Transparent background (PNG/WebP)" />}
           </Card>
           <Card className="space-y-3 p-4">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-semibold uppercase tracking-widest text-ink3">Color & background</div>
+              {opts.hue !== null && <button className="text-xs text-accent hover:underline" onClick={() => setOpts({ ...opts, hue: null })}>Use brand color</button>}
+            </div>
+            <Field label={opts.hue === null ? 'Color — brand accent' : `Color — hue ${opts.hue}°`}>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range" min={0} max={359} step={1} aria-label="Color hue"
+                  value={opts.hue ?? brandHue}
+                  onChange={(e) => setOpts({ ...opts, hue: Number(e.target.value) })}
+                  className="hue-slider h-3 w-full cursor-pointer appearance-none rounded-full"
+                  style={{ background: 'linear-gradient(to right, hsl(0 90% 60%), hsl(60 90% 60%), hsl(120 90% 60%), hsl(180 90% 60%), hsl(240 90% 60%), hsl(300 90% 60%), hsl(359 90% 60%))' }}
+                />
+                <span className="size-7 shrink-0 rounded-lg border border-line" style={{ background: `hsl(${opts.hue ?? brandHue} 90% 65%)` }} />
+              </div>
+            </Field>
+            <Field label="Background">
+              <Select className="w-full" value={opts.background} onChange={(e) => setOpts({ ...opts, background: e.target.value as typeof opts.background })}>
+                <option value="auto">Template default</option>
+                <option value="galaxy">Galaxy</option>
+                <option value="aurora">Aurora</option>
+                <option value="holo">Holo rays</option>
+                <option value="solid">Solid</option>
+              </Select>
+            </Field>
+            <RangeField label="Glow" value={opts.glow} min={0} max={2} step={0.1} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => setOpts({ ...opts, glow: v })} />
+            <div className="grid grid-cols-2 gap-2">
+              <Toggle checked={opts.stars} onChange={(v) => setOpts({ ...opts, stars: v })} label="Stars" />
+              <Toggle checked={opts.gridLines} onChange={(v) => setOpts({ ...opts, gridLines: v })} label="Grid lines" />
+            </div>
+          </Card>
+          <Card className="space-y-3 p-4">
+            <div className="text-xs font-semibold uppercase tracking-widest text-ink3">Product tiles</div>
+            <RangeField label="Corner roundness" value={opts.tileRadius} min={0} max={2.5} step={0.1} format={(v) => (v === 0 ? 'Square' : `${Math.round(v * 100)}%`)} onChange={(v) => setOpts({ ...opts, tileRadius: v })} />
+            <RangeField label="Title size" value={opts.tileTextScale} min={0.6} max={1.6} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => setOpts({ ...opts, tileTextScale: v })} />
+            <Field label="Title lines">
+              <Tabs value={String(opts.tileTitleLines)} onChange={(v) => setOpts({ ...opts, tileTitleLines: Number(v) })} tabs={['1', '2', '3'].map((n) => ({ id: n, label: n }))} />
+            </Field>
+            <div className="grid grid-cols-2 gap-x-2 gap-y-3">
+              <Toggle checked={opts.showTitles} onChange={(v) => setOpts({ ...opts, showTitles: v })} label="Titles" />
+              <Toggle checked={opts.tileQtyBadge} onChange={(v) => setOpts({ ...opts, tileQtyBadge: v })} label="Qty badge" />
+              <Toggle checked={opts.tileGlow} onChange={(v) => setOpts({ ...opts, tileGlow: v })} label="Tile glow" />
+              <Toggle checked={opts.tileBorder} onChange={(v) => setOpts({ ...opts, tileBorder: v })} label="Tile border" />
+            </div>
+            <Field label="Max products (0 = auto)"><Input type="number" min={0} max={400} value={opts.maxProducts} onChange={(e) => setOpts({ ...opts, maxProducts: Number(e.target.value) || 0 })} /></Field>
+          </Card>
+          <Card className="space-y-3 p-4">
             <div className="text-xs font-semibold uppercase tracking-widest text-ink3">Style & privacy</div>
             <Field label="Title override"><Input value={opts.title} onChange={(e) => setOpts({ ...opts, title: e.target.value })} placeholder={tdef?.name} /></Field>
             <Field label="Watermark">
@@ -189,8 +246,6 @@ export function Studio() {
                 <option value="none">None</option>
               </Select>
             </Field>
-            <Field label="Max products (0 = auto)"><Input type="number" min={0} max={400} value={opts.maxProducts} onChange={(e) => setOpts({ ...opts, maxProducts: Number(e.target.value) || 0 })} /></Field>
-            <Toggle checked={opts.showTitles} onChange={(v) => setOpts({ ...opts, showTitles: v })} label="Product titles under tiles" />
             <Toggle checked={opts.masked} onChange={(v) => setOpts({ ...opts, masked: v })} label="Masked member names (no avatars)" />
             <p className="text-[11px] text-ink3">Brand name, tagline, accent color and logo come from Settings → Branding. Addresses, emails, order and tracking numbers never appear on exports.</p>
           </Card>
@@ -216,7 +271,7 @@ export function Studio() {
             {!saved?.length && <div className="text-xs text-ink3">Save a template + size + style combination for one-click reuse.</div>}
           </Card>
         </div>
-        <div className="space-y-4">
+        <div className="space-y-4 self-start xl:sticky xl:top-0">
           <Card className="relative overflow-hidden p-4">
             <div className="mb-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -502,3 +557,22 @@ function Inspector({ el, onChange, onDuplicate, onDelete, onFront, onBack }: { e
 }
 
 export { AnimatePresence, Plus };
+
+function hueOf(hex: string): number {
+  const m = hex.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  if (!m) return 260;
+  const [r, g, b] = [m[1], m[2], m[3]].map((x) => parseInt(x, 16) / 255);
+  const max = Math.max(r, g, b);
+  const d = max - Math.min(r, g, b);
+  if (!d) return 0;
+  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return Math.round((h * 60 + 360) % 360);
+}
+
+function RangeField({ label, value, min, max, step, format, onChange }: { label: string; value: number; min: number; max: number; step: number; format: (v: number) => string; onChange: (v: number) => void }) {
+  return (
+    <Field label={`${label} — ${format(value)}`}>
+      <input type="range" min={min} max={max} step={step} value={value} aria-label={label} onChange={(e) => onChange(Number(e.target.value))} className="w-full cursor-pointer accent-[var(--g-accent)]" />
+    </Field>
+  );
+}

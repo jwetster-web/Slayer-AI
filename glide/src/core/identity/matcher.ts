@@ -17,9 +17,11 @@ export const WEIGHTS = {
   emailBaseVerified: 0.9,
   emailProposed: 0.55,
   catchAllDomain: 0.75,
-  addressVerifiedExclusive: 0.85,
+  // A verified address owned by exactly one member (e.g. from the member address import) is enough on its own to auto-assign.
+  addressVerifiedExclusive: 0.92,
   addressVerifiedShared: 0.25,
   addressProposed: 0.45,
+  addressSimilar: 0.5,
   streetExclusive: 0.2,
   nameExact: 0.6,
   nameNickname: 0.45,
@@ -115,6 +117,10 @@ export function gatherCandidates(db: Db, o: OrderFacts): Candidate[] {
         [street ?? '', o.shipping_address_id],
       );
       if (neighbours.length === 1) add(live(neighbours[0].member_id)!, 'street', 'Same building as a verified address (different unit)', WEIGHTS.streetExclusive);
+      else if (!neighbours.length) {
+        // Typos on either side ("Poplar Vallley", a wrong ZIP): suggest the member for review, never auto-assign on this alone.
+        for (const s of similarVerifiedAddresses(db, o.shipping_address_id)) add(live(s.memberId)!, 'address_similar', `Looks like ${s.memberName}'s address ${s.line1}, ${s.city} ${s.postal} (${s.why})`, WEIGHTS.addressSimilar);
+      }
     }
   }
 
@@ -358,4 +364,52 @@ export function scanDuplicateMembers(db: Db): number {
     if ((db.value<number>('SELECT COUNT(*) FROM match_candidates') ?? 0) > (before ?? 0)) created++;
   }
   return created;
+}
+
+function editDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let diag = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = prev[j];
+      prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diag = tmp;
+    }
+  }
+  return prev[b.length];
+}
+
+/**
+ * Verified member addresses that are probably the same place as `addressId`: same house number and
+ * either the same ZIP with a slightly different street spelling, or the same street in the same city
+ * with a different ZIP. Only single-owner addresses are suggested.
+ */
+export function similarVerifiedAddresses(db: Db, addressId: number): { memberId: number; memberName: string; line1: string; city: string; postal: string; why: string }[] {
+  const a = db.get<{ street_key: string; city: string; postal: string; country: string; unit: string | null }>(
+    "SELECT street_key, city, postal, country, NULLIF(substr(canonical_key, length(street_key) + 2), '') AS unit FROM addresses WHERE id = ?",
+    [addressId],
+  );
+  if (!a) return [];
+  const street = a.street_key.split('|')[2] ?? '';
+  const num = street.match(/^(\d+[A-Z]?)\s+(.+)$/);
+  if (!num) return [];
+  const rows = db.all<{ id: number; street_key: string; city: string; postal: string; line1: string; member_id: number; name: string }>(
+    `SELECT a.id, a.street_key, a.city, a.postal, a.line1, ao.member_id, COALESCE(m.display_name, m.username) AS name
+     FROM addresses a JOIN address_owners ao ON ao.address_id = a.id AND ao.status = 'verified' JOIN members m ON m.id = ao.member_id AND m.merged_into_id IS NULL
+     WHERE a.id <> ? AND a.country = ? AND (a.postal = ? OR upper(a.city) = upper(?)) AND (a.street_key LIKE ? )
+       AND (SELECT COUNT(*) FROM address_owners x WHERE x.address_id = a.id AND x.status = 'verified') = 1`,
+    [addressId, a.country, a.postal, a.city, `%|${num[1]} %`],
+  );
+  const out: { memberId: number; memberName: string; line1: string; city: string; postal: string; why: string }[] = [];
+  for (const r of rows) {
+    const other = (r.street_key.split('|')[2] ?? '').replace(/^\d+[A-Z]?\s+/, '');
+    const d = editDistance(num[2], other);
+    const close = d <= Math.max(1, Math.floor(Math.min(num[2].length, other.length) / 6)) || other.startsWith(num[2]) || num[2].startsWith(other);
+    if (!close) continue;
+    const why = r.postal !== a.postal ? `ZIP ${a.postal} vs ${r.postal}` : 'street spelled differently';
+    if (!out.some((x) => x.memberId === r.member_id)) out.push({ memberId: r.member_id, memberName: r.name, line1: r.line1, city: r.city, postal: r.postal, why });
+  }
+  return out.length === 1 ? out : [];
 }

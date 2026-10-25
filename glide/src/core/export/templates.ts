@@ -22,6 +22,22 @@ export interface TemplateOptions {
   progress?: number;
   maxProducts?: number;
   showTitles?: boolean;
+  /** Studio color slider: 0–360 hue for the whole graphic; undefined = brand accent. */
+  hue?: number;
+  /** Background override; 'auto' keeps each template's own style. */
+  background?: 'auto' | 'galaxy' | 'aurora' | 'holo' | 'solid';
+  stars?: boolean;
+  gridLines?: boolean;
+  /** Nebula glow strength multiplier (0 = none, 1 = default, 2 = double). */
+  glow?: number;
+  /** Product tiles: corner roundness multiplier (0 = square, 1 = default, 2.5 = very round). */
+  tileRadius?: number;
+  /** Product tiles: title text size multiplier. */
+  tileTextScale?: number;
+  tileTitleLines?: number;
+  tileQtyBadge?: boolean;
+  tileGlow?: boolean;
+  tileBorder?: boolean;
 }
 
 export interface TemplateDef {
@@ -62,15 +78,18 @@ function defs(p: Palette): string {
 </defs>`;
 }
 
-function background(W: number, H: number, p: Palette, seed: string, o: TemplateOptions, style: 'galaxy' | 'aurora' | 'holo' = 'galaxy'): string {
+function background(W: number, H: number, p: Palette, seed: string, o: TemplateOptions, templateStyle: 'galaxy' | 'aurora' | 'holo' = 'galaxy'): string {
   if (o.transparent) return '';
+  if (o.background === 'solid') return `<rect width="${W}" height="${H}" fill="${p.bg0}"/><rect width="${W}" height="${H}" fill="${p.bg1}" opacity="0.55"/>`;
+  const style = o.background && o.background !== 'auto' ? o.background : templateStyle;
+  const glowK = Math.max(0, o.glow ?? 1);
   const r = seeded(seed + style);
   const blobs = [
     { x: W * (0.15 + r() * 0.2), y: H * (0.1 + r() * 0.2), rx: W * 0.45, ry: H * 0.32, c: p.accent, o: 0.32 },
     { x: W * (0.7 + r() * 0.2), y: H * (0.25 + r() * 0.25), rx: W * 0.4, ry: H * 0.35, c: p.accent3, o: 0.22 },
     { x: W * (0.4 + r() * 0.2), y: H * (0.85 + r() * 0.1), rx: W * 0.55, ry: H * 0.25, c: p.accent2, o: 0.18 },
   ];
-  const nebula = blobs.map((b) => `<ellipse cx="${b.x}" cy="${b.y}" rx="${b.rx}" ry="${b.ry}" fill="${b.c}" opacity="${b.o}" filter="url(#blurXL)"/>`).join('');
+  const nebula = glowK ? blobs.map((b) => `<ellipse cx="${b.x}" cy="${b.y}" rx="${b.rx}" ry="${b.ry}" fill="${b.c}" opacity="${Math.min(1, b.o * glowK).toFixed(3)}" filter="url(#blurXL)"/>`).join('') : '';
   const rays =
     style === 'holo'
       ? Array.from({ length: 28 }, (_, i) => {
@@ -85,8 +104,8 @@ function background(W: number, H: number, p: Palette, seed: string, o: TemplateO
   return `<rect width="${W}" height="${H}" fill="${p.bg0}"/>
 <rect width="${W}" height="${H}" fill="${p.bg1}" opacity="0.55"/>
 ${nebula}${rays}
-<g mask="url(#gridMask)">${gridLines(W, H, Math.round(Math.min(W, H) / 18), 0.045)}</g>
-${starfield(W, H, seed, Math.round((W * H) / 5200))}
+${o.gridLines === false ? '' : `<g mask="url(#gridMask)">${gridLines(W, H, Math.round(Math.min(W, H) / 18), 0.045)}</g>`}
+${o.stars === false ? '' : starfield(W, H, seed, Math.round((W * H) / 5200))}
 <rect width="${W}" height="${H}" fill="url(#vignette)" opacity="0.9"/>
 <defs><radialGradient id="vignette" cx="50%" cy="45%" r="75%"><stop offset="0.6" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.65"/></radialGradient></defs>`;
 }
@@ -149,8 +168,8 @@ function kpiChip(x: number, y: number, w: number, h: number, label: string, valu
 <text x="${x + 18 * scale}" y="${y + h * 0.84}" font-family="${FONT_DISPLAY}" font-weight="700" font-size="${vs}" fill="${p.text}">${esc(value)}</text></g>`;
 }
 
-function productTile(x: number, y: number, w: number, h: number, pr: RecapProduct, p: Palette, scale: number, showTitle: boolean, appear = 1): string {
-  const r = Math.min(22 * scale, w * 0.12);
+function productTile(x: number, y: number, w: number, h: number, pr: RecapProduct, p: Palette, scale: number, showTitle: boolean, appear = 1, o: TemplateOptions = { width: 0, height: 0 }): string {
+  const r = Math.min(22 * scale, w * 0.12) * Math.max(0, o.tileRadius ?? 1);
   const cid = id('pc');
   const imgPad = w * 0.08;
   const titleH = showTitle ? Math.min(h * 0.2, 46 * scale) : 0;
@@ -161,16 +180,16 @@ function productTile(x: number, y: number, w: number, h: number, pr: RecapProduc
   const img = pr.image
     ? `<image href="${pr.image}" x="${x + imgPad}" y="${y + imgPad}" width="${w - imgPad * 2}" height="${imgH - imgPad}" preserveAspectRatio="xMidYMid meet" clip-path="url(#${cid})"/>`
     : `<text x="${x + w / 2}" y="${y + imgH / 2 + 8 * scale}" font-family="${FONT_DISPLAY}" font-weight="700" font-size="${Math.min(30 * scale, w * 0.14)}" fill="${p.muted}" text-anchor="middle">${esc(CATEGORY_LABEL[pr.category]?.split(' ').map((s) => s[0]).join('') ?? '◆')}</text>`;
-  const fs = Math.max(9, Math.min(15 * scale, w * 0.075));
-  const lines = showTitle ? wrapText(pr.title.replace(/^Pok[ée]mon TCG:\s*/i, ''), w - 20 * scale, fs, 2) : [];
+  const fs = Math.max(9, Math.min(15 * scale, w * 0.075)) * Math.min(2, Math.max(0.5, o.tileTextScale ?? 1));
+  const lines = showTitle ? wrapText(pr.title.replace(/^Pok[ée]mon TCG:\s*/i, ''), w - 20 * scale, fs, Math.max(1, Math.min(4, o.tileTitleLines ?? 2))) : [];
   const ty = y + h - titleH + fs * 0.4;
   return `<g opacity="${appear.toFixed(3)}" transform="translate(0 ${((1 - appear) * 30 * scale).toFixed(1)})">
 <defs><clipPath id="${cid}"><rect x="${x + imgPad}" y="${y + imgPad}" width="${w - imgPad * 2}" height="${imgH - imgPad}" rx="${r * 0.6}"/></clipPath></defs>
-<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="url(#gGlass)" stroke="url(#gEdge)" stroke-width="1.2"/>
-<rect x="${x}" y="${y}" width="${w}" height="${imgH}" rx="${r}" fill="url(#gTile)"/>
+<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="url(#gGlass)"${o.tileBorder === false ? '' : ' stroke="url(#gEdge)" stroke-width="1.2"'}/>
+${o.tileGlow === false ? '' : `<rect x="${x}" y="${y}" width="${w}" height="${imgH}" rx="${r}" fill="url(#gTile)"/>`}
 ${img}
-<rect x="${x + w / 2 - bw / 2}" y="${y + imgH - badgeH * 0.45}" width="${bw}" height="${badgeH}" rx="${badgeH / 2}" fill="url(#gAccent)"/>
-<text x="${x + w / 2}" y="${y + imgH - badgeH * 0.45 + badgeH * 0.72}" font-family="${FONT_DISPLAY}" font-weight="700" font-size="${badgeH * 0.62}" fill="#fff" text-anchor="middle">${esc(qty)}</text>
+${o.tileQtyBadge === false ? '' : `<rect x="${x + w / 2 - bw / 2}" y="${y + imgH - badgeH * 0.45}" width="${bw}" height="${badgeH}" rx="${badgeH / 2}" fill="url(#gAccent)"/>
+<text x="${x + w / 2}" y="${y + imgH - badgeH * 0.45 + badgeH * 0.72}" font-family="${FONT_DISPLAY}" font-weight="700" font-size="${badgeH * 0.62}" fill="#fff" text-anchor="middle">${esc(qty)}</text>`}
 ${lines.map((l, i) => `<text x="${x + w / 2}" y="${ty + i * fs * 1.25}" font-family="${FONT_BODY}" font-weight="600" font-size="${fs}" fill="${p.text}" fill-opacity="0.86" text-anchor="middle">${esc(l)}</text>`).join('')}
 </g>`;
 }
@@ -192,7 +211,7 @@ function productGrid(x: number, y: number, w: number, h: number, products: Recap
       const lastRowCount = products.length - rr * g.cols;
       const rowOffset = lastRowCount < g.cols ? ((g.cols - lastRowCount) * (g.tileW + gap)) / 2 : 0;
       const appear = stage(o, 0.25 + (i / products.length) * 0.5, 0.45 + (i / products.length) * 0.5);
-      return productTile(ox + rowOffset + c * (g.tileW + gap), oy + rr * (g.tileH + gap), g.tileW, g.tileH, pr, p, scale, titles, appear);
+      return productTile(ox + rowOffset + c * (g.tileW + gap), oy + rr * (g.tileH + gap), g.tileW, g.tileH, pr, p, scale, titles, appear, o);
     })
     .join('');
 }
@@ -240,7 +259,7 @@ const galactic: TemplateDef = {
   render(d, o) {
     const W = o.width;
     const H = o.height;
-    const p = palette(d.accent);
+    const p = palette(d.accent, o.hue);
     const scale = Math.min(W, H) / 1080;
     const pad = 64 * scale;
     const landscape = W > H * 1.25;
@@ -309,7 +328,7 @@ const legendary: TemplateDef = {
   render(d, o) {
     const W = o.width;
     const H = o.height;
-    const p = palette(d.accent);
+    const p = palette(d.accent, o.hue);
     const scale = Math.min(W, H) / 1080;
     const pad = 64 * scale;
     const k = d.kpis;
@@ -380,7 +399,7 @@ const wall: TemplateDef = {
   render(d, o) {
     const W = o.width;
     const H = o.height;
-    const p = palette(d.accent);
+    const p = palette(d.accent, o.hue);
     const scale = Math.min(W, H) / 1080;
     const pad = 56 * scale;
     let body = background(W, H, p, `wall${d.rangeLabel}`, o, 'aurora');
@@ -406,7 +425,7 @@ const leaderboard: TemplateDef = {
   render(d, o) {
     const W = o.width;
     const H = o.height;
-    const p = palette(d.accent);
+    const p = palette(d.accent, o.hue);
     const scale = Math.min(W, H) / 1080;
     const pad = 64 * scale;
     let body = background(W, H, p, `leader${d.rangeLabel}`, o, 'galaxy');
@@ -459,7 +478,7 @@ const retailers: TemplateDef = {
   render(d, o) {
     const W = o.width;
     const H = o.height;
-    const p = palette(d.accent);
+    const p = palette(d.accent, o.hue);
     const scale = Math.min(W, H) / 1080;
     const pad = 64 * scale;
     let body = background(W, H, p, `retail${d.rangeLabel}`, o, 'aurora');
@@ -514,7 +533,7 @@ const shipments: TemplateDef = {
   render(d, o) {
     const W = o.width;
     const H = o.height;
-    const p = palette(d.accent);
+    const p = palette(d.accent, o.hue);
     const scale = Math.min(W, H) / 1080;
     const pad = 64 * scale;
     const s = d.shipments;
@@ -643,7 +662,7 @@ const custom: TemplateDef = {
     const project = proj ?? defaultCustomProject(o.width, o.height);
     const W = project.width;
     const H = project.height;
-    const p = palette(d.accent);
+    const p = palette(d.accent, o.hue);
     const scale = Math.min(W, H) / 1080;
     let body = project.background === 'none' || o.transparent ? '' : project.background === 'solid' ? `<rect width="${W}" height="${H}" fill="${p.bg0}"/>` : background(W, H, p, `custom${project.name}`, o, project.background);
     for (const e of project.elements) {
@@ -673,7 +692,7 @@ const custom: TemplateDef = {
           break;
         case 'product': {
           const pr = d.products[e.rank - 1];
-          if (pr) body += productTile(e.x, e.y, e.w, e.h, pr, p, scale, e.h > 160 * scale);
+          if (pr) body += productTile(e.x, e.y, e.w, e.h, pr, p, scale, e.h > 160 * scale, 1, o);
           break;
         }
         case 'leaderboard': {

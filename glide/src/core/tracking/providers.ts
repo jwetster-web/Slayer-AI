@@ -233,11 +233,93 @@ export const SEVENTEEN_TRACK: TrackingProvider = {
   },
 };
 
-export const PROVIDERS: TrackingProvider[] = [UPS, FEDEX, USPS, DHL, SEVENTEEN_TRACK];
+const SHIPPO_CARRIER: Partial<Record<Carrier, string>> = {
+  ups: 'ups', fedex: 'fedex', usps: 'usps', dhl: 'dhl_express', ontrac: 'ontrac', lasership: 'lasership', canadapost: 'canada_post', royalmail: 'royal_mail',
+};
 
-/** The carrier's own API when configured, otherwise 17TRACK when it has a key. */
+function shippoStatus(e: { status?: string; status_details?: string; substatus?: { code?: string } | null }): PackageStatus | null {
+  const code = e.substatus?.code ?? '';
+  switch (e.status) {
+    case 'DELIVERED': return 'delivered';
+    case 'RETURNED': return 'returned';
+    case 'FAILURE': return 'exception';
+    case 'PRE_TRANSIT': return 'label_created';
+    case 'TRANSIT': {
+      if (code === 'out_for_delivery') return 'out_for_delivery';
+      if (/delay|reschedul/.test(code)) return 'delayed';
+      const t = statusFromText(e.status_details ?? '');
+      return t === 'out_for_delivery' || t === 'delayed' || t === 'exception' ? t : 'in_transit';
+    }
+    default: return null;
+  }
+}
+
+/**
+ * Shippo Tracking API (free plan): GET /tracks/{carrier}/{number} with a live API token.
+ * Requests are paced and a 429 backs off once, so a large refresh stays within the plan's rate limit.
+ */
+export const SHIPPO: TrackingProvider = {
+  id: 'shippo',
+  name: 'Shippo (UPS, FedEx, USPS, DHL, OnTrac… — one free API token)',
+  carriers: ['ups', 'fedex', 'usps', 'dhl', 'ontrac', 'lasership', 'canadapost', 'royalmail'],
+  async track(numbers, creds, fetcher = fetch) {
+    // Pasted tokens often carry spaces, quotes or a "ShippoToken " prefix copied from the docs.
+    const token = (creds.apiKey ?? '').replace(/^\s*["']?(?:ShippoToken|Bearer)\s+/i, '').replace(/["'\s]/g, '');
+    if (/^shippo_test_/.test(token)) throw new Error('Shippo test tokens only return mock data — use your live token (shippo_live_…)');
+    const kind = /^shippo_live_/.test(token) ? 'a live token (shippo_live_…)' : /^oauth\./.test(token) ? 'an OAuth token (oauth.…)' : `an unrecognized token (${token.length} characters; live tokens start with shippo_live_)`;
+    const out: TrackingResult[] = [];
+    // OAuth access tokens use Bearer; API tokens use ShippoToken.
+    const headers = { Authorization: /^oauth\./.test(token) ? `Bearer ${token}` : `ShippoToken ${token}`, Accept: 'application/json' };
+    for (const raw of numbers) {
+      const [carrier, n] = raw.includes(':') ? raw.split(':') : ['', raw];
+      const sc = SHIPPO_CARRIER[carrier as Carrier];
+      if (!sc) continue;
+      const url = `https://api.goshippo.com/tracks/${sc}/${encodeURIComponent(n)}`;
+      let res = await fetcher(url, { headers });
+      if (res.status === 429) {
+        await new Promise((r) => setTimeout(r, 15000));
+        res = await fetcher(url, { headers });
+      }
+      if (res.status === 401 || res.status === 403) {
+        const detail = ((await res.json().catch(() => null)) as { detail?: string } | null)?.detail;
+        if (detail && /payment method/i.test(detail)) throw new Error(`Shippo accepted the token but won't serve tracking until your Shippo account has a payment method on file (goshippo.com/user/billing). ${detail}`);
+        throw new Error(`Shippo rejected the API token (${res.status}${detail ? `: ${detail}` : ''}) — GLIDE has ${kind}. Copy the Live token from apps.goshippo.com → Settings → API and paste it again.`);
+      }
+      if (!res.ok) continue;
+      const j = (await res.json()) as any;
+      const history: any[] = [...(j.tracking_history ?? []), ...(j.tracking_status ? [j.tracking_status] : [])];
+      const events: TrackingEvent[] = [];
+      const seen = new Set<string>();
+      for (const e of history) {
+        const status = shippoStatus(e);
+        if (!status) continue;
+        const key = `${e.status_date}|${status}|${e.status_details}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        events.push({
+          status,
+          description: e.status_details || status.replace(/_/g, ' '),
+          location: [e.location?.city, e.location?.state].filter(Boolean).join(', ') || null,
+          occurredAt: iso(e.status_date),
+        });
+      }
+      out.push({ trackingNumber: raw, events, estimatedDelivery: j.eta ?? undefined });
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    return out;
+  },
+};
+
+export const PROVIDERS: TrackingProvider[] = [UPS, FEDEX, USPS, DHL, SHIPPO, SEVENTEEN_TRACK];
+
+const AGGREGATORS = new Set([SHIPPO.id, SEVENTEEN_TRACK.id]);
+
+/** The carrier's own API when configured, then Shippo, then 17TRACK — whichever has credentials. */
 export function providerFor(carrier: string, hasCreds: (id: string) => boolean): TrackingProvider | undefined {
-  return PROVIDERS.find((x) => x.id !== SEVENTEEN_TRACK.id && x.carriers.includes(carrier as Carrier) && hasCreds(x.id)) ?? (hasCreds(SEVENTEEN_TRACK.id) ? SEVENTEEN_TRACK : undefined);
+  return (
+    PROVIDERS.find((x) => !AGGREGATORS.has(x.id) && x.carriers.includes(carrier as Carrier) && hasCreds(x.id)) ??
+    [SHIPPO, SEVENTEEN_TRACK].find((x) => x.carriers.includes(carrier as Carrier) && hasCreds(x.id))
+  );
 }
 
 export interface RefreshDeps {
@@ -249,16 +331,17 @@ export interface RefreshDeps {
 }
 
 /** Polls configured carrier APIs for packages that are due. Returns the number of packages updated. */
-export async function refreshDuePackages(deps: RefreshDeps): Promise<{ checked: number; updated: number; skipped: number }> {
+export async function refreshDuePackages(deps: RefreshDeps): Promise<{ checked: number; updated: number; skipped: number; errors: string[] }> {
   const { db } = deps;
   const sink = deps.sink ?? new EventSink();
   const due = db.all<{ id: number; order_id: number; tracking_number: string; carrier: string; check_failures: number }>(
     "SELECT id, order_id, tracking_number, carrier, check_failures FROM packages WHERE status NOT IN ('delivered','returned') AND (next_check_at IS NULL OR next_check_at <= ?) ORDER BY next_check_at LIMIT ?",
-    [now(), deps.limit ?? 40],
+    [now(), deps.limit ?? 120],
   );
   let checked = 0;
   let updated = 0;
   let skipped = 0;
+  const errors: string[] = [];
   const byProvider = new Map<TrackingProvider, typeof due>();
   for (const p of due) {
     const prov = providerFor(p.carrier, (id) => !!deps.credentialsFor(id));
@@ -269,10 +352,13 @@ export async function refreshDuePackages(deps: RefreshDeps): Promise<{ checked: 
     byProvider.set(prov, [...(byProvider.get(prov) ?? []), p]);
   }
   for (const [prov, pkgs] of byProvider) {
+    // Shippo's endpoint needs the carrier as well as the number.
+    const keyFor = (p: { carrier: string; tracking_number: string }) => (prov.id === SHIPPO.id ? `${p.carrier}:${p.tracking_number}` : p.tracking_number);
     let results: TrackingResult[] = [];
     try {
-      results = await prov.track(pkgs.map((p) => p.tracking_number), deps.credentialsFor(prov.id)!, deps.fetcher);
-    } catch {
+      results = await prov.track(pkgs.map(keyFor), deps.credentialsFor(prov.id)!, deps.fetcher);
+    } catch (e) {
+      errors.push(`${prov.name}: ${(e as Error).message}`);
       for (const p of pkgs) {
         const backoff = Math.min(24, 2 ** (p.check_failures + 1));
         db.run('UPDATE packages SET check_failures = check_failures + 1, next_check_at = ? WHERE id = ?', [new Date(Date.now() + backoff * 3600000).toISOString(), p.id]);
@@ -281,7 +367,7 @@ export async function refreshDuePackages(deps: RefreshDeps): Promise<{ checked: 
     }
     for (const p of pkgs) {
       checked++;
-      const r = results.find((x) => x.trackingNumber.toUpperCase() === p.tracking_number.toUpperCase());
+      const r = results.find((x) => x.trackingNumber.toUpperCase() === keyFor(p).toUpperCase());
       db.tx(() => {
         let changed = false;
         for (const e of r?.events ?? []) {
@@ -303,5 +389,5 @@ export async function refreshDuePackages(deps: RefreshDeps): Promise<{ checked: 
       });
     }
   }
-  return { checked, updated, skipped };
+  return { checked, updated, skipped, errors };
 }

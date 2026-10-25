@@ -1,6 +1,6 @@
 {
   "name": "glide",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "GLIDE — PokeSlayerz Order Command Center: desktop order intelligence for cook groups.",
   "main": "dist-electron/main.cjs",
   "scripts": {
@@ -15,7 +15,7 @@
     "test:perf": "vitest run --config vitest.perf.config.ts",
     "test:e2e": "npm run build && playwright test",
     "dist": "npm run build && electron-builder",
-    "dist:win": "npm run build && electron-builder --win",
+    "dist:win": "npm run build && electron-builder --win --publish never",
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:linux": "npm run build && electron-builder --linux",
     "icon": "node scripts/make-icon.mjs",
@@ -45,6 +45,7 @@
     "@resvg/resvg-js": "^2.6.2",
     "@tanstack/react-virtual": "^3.14.22",
     "echarts": "^6.1.0",
+    "electron-updater": "^6.8.11",
     "gifenc": "^1.0.3",
     "imapflow": "^2.9.1",
     "lucide-react": "^1.61.0",
@@ -109,7 +110,14 @@
       "category": "Office",
       "icon": "build/icon.png"
     },
-    "publish": null
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "jwetster-web",
+        "repo": "Slayer-AI",
+        "releaseType": "release"
+      }
+    ]
   },
   "type": "module",
   "repository": {

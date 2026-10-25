@@ -416,7 +416,7 @@ function dedupeItems(items: ParsedItem[]): ParsedItem[] {
 // ---------------------------------------------------------------------------
 // Addresses
 
-const SHIP_HEADING = /^(ship(ping|ped)?\s+to|shipping\s+address|delivery\s+address|deliver(ing|y|ed)?\s+to|sending\s+to|your\s+order\s+will\s+(be\s+)?(shipped|delivered)\s+to|lieferadresse|versandadresse|lieferung\s+an|adresse de livraison)\b\s*:?/i;
+const SHIP_HEADING = /^(ship(ping|ped)?\s+to|shipping\s+address|delivery\s+address|deliver(s|ing|y|ed)?\s+to|sending\s+to|your\s+order\s+will\s+(be\s+)?(shipped|delivered)\s+to|lieferadresse|versandadresse|lieferung\s+an|adresse de livraison)\b\s*:?/i;
 const BILL_HEADING = /^(billing\s+address|bill(ed|ing)?\s+to|rechnungsadresse|adresse de facturation)\b\s*:?/i;
 const CITY_US = /^(.+?),?\s+([A-Z]{2})\s*,?\s+(\d{5}(?:-\d{4})?)$/i;
 const CITY_US_FULL = /^(.+?),\s*([A-Za-z ]{4,}),?\s+(\d{5}(?:-\d{4})?)$/;
@@ -425,20 +425,31 @@ const CITY_GB_POST = /^([A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2})$/i;
 const CITY_DE = /^(\d{5})\s+(.+)$/;
 const COUNTRY_LINE = /^(united states( of america)?|usa|us|united kingdom|uk|great britain|canada|germany|deutschland)$/i;
 
+/** "Name, 10930 17TH PL W, Everett, WA 98204" (Target, forwarders) → ["Name", "10930 17TH PL W", "Everett, WA 98204"]. */
+function splitOneLineAddress(l: string): string[] {
+  const parts = l.split(/\s*,\s*/).filter(Boolean);
+  if (parts.length < 3 || !/^[A-Z]{2}\s+\d{5}(-\d{4})?$/i.test(parts[parts.length - 1])) return [l];
+  return [...parts.slice(0, -2), `${parts[parts.length - 2]}, ${parts[parts.length - 1]}`];
+}
+
 export function parseAddressLines(raw: string[]): ParsedAddress | null {
-  const ls = raw.map((s) => s.trim()).filter(Boolean).slice(0, 7);
+  const ls = raw.flatMap((s) => splitOneLineAddress(s.trim())).filter(Boolean).slice(0, 7);
   let cityIdx = -1;
   let city = '';
   let state: string | undefined;
   let postal = '';
   let country: string | undefined;
-  for (let i = 0; i < ls.length; i++) {
+  // North American "City, ST 12345" lines win over a street line that merely looks like a German "12345 City".
+  for (let i = 0; i < ls.length && cityIdx < 0; i++) {
     const l = ls[i];
     let m = l.match(CITY_US) ?? l.match(CITY_US_FULL);
     if (m) { cityIdx = i; city = m[1]; state = m[2]; postal = m[3]; country = 'US'; break; }
     m = l.match(CITY_CA);
     if (m) { cityIdx = i; city = m[1]; state = m[2]; postal = m[3]; country = 'CA'; break; }
-    m = l.match(CITY_DE);
+  }
+  for (let i = 0; i < ls.length && cityIdx < 0; i++) {
+    const l = ls[i];
+    const m = l.match(CITY_DE);
     if (m && i > 0) { cityIdx = i; postal = m[1]; city = m[2]; country = 'DE'; break; }
     if (CITY_GB_POST.test(l) && i > 1) {
       cityIdx = i; postal = l; city = ls[i - 1]; country = 'GB';

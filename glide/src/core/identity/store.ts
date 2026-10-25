@@ -86,6 +86,12 @@ export function upsertMember(db: Db, m: MemberInput, actor = 'system'): { id: nu
       }
       return { id: existing.id, created: false };
     }
+    // A member imported by username (CSV) gets its Discord ID the first time the server sync sees them.
+    const imported = db.get<{ id: number }>('SELECT id FROM members WHERE discord_id IS NULL AND merged_into_id IS NULL AND username = ? COLLATE NOCASE', [m.username]);
+    if (imported) {
+      db.run('UPDATE members SET discord_id = ?, display_name = COALESCE(?, display_name), avatar_url = COALESCE(?, avatar_url), updated_at = ? WHERE id = ?', [m.discordId, m.displayName ?? null, m.avatarUrl ?? null, ts, imported.id]);
+      return { id: imported.id, created: false };
+    }
   } else {
     const byName = db.get<{ id: number }>('SELECT id FROM members WHERE discord_id IS NULL AND username = ? COLLATE NOCASE', [m.username]);
     if (byName) return { id: byName.id, created: false };

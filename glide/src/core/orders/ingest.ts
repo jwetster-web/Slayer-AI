@@ -64,7 +64,7 @@ function activity(db: Db, kind: ActivityKind, o: { id: number; retailer_id: stri
   );
 }
 
-function orderEvent(db: Db, orderId: number, kind: string, label: string, at: string, source: string, sourceMessageId: number | null, detail: Record<string, unknown> | null, dedupeKey: string | null): boolean {
+export function orderEvent(db: Db, orderId: number, kind: string, label: string, at: string, source: string, sourceMessageId: number | null, detail: Record<string, unknown> | null, dedupeKey: string | null): boolean {
   const r = db.run(
     'INSERT OR IGNORE INTO order_events (order_id, kind, label, occurred_at, source, source_message_id, detail_json, dedupe_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     [orderId, kind, label, at, source, sourceMessageId, detail ? JSON.stringify(detail) : null, dedupeKey],
@@ -150,7 +150,7 @@ export function addTrackingEvent(db: Db, packageId: number, status: PackageStatu
   return true;
 }
 
-function deliverItemsForPackage(db: Db, orderId: number, packageId: number) {
+export function deliverItemsForPackage(db: Db, orderId: number, packageId: number) {
   const mapped = db.all<{ order_item_id: number; quantity: number }>('SELECT order_item_id, quantity FROM package_items WHERE package_id = ?', [packageId]);
   if (mapped.length) {
     for (const m of mapped) db.run('UPDATE order_items SET delivered_qty = MIN(quantity - canceled_qty, delivered_qty + ?) WHERE id = ?', [m.quantity, m.order_item_id]);

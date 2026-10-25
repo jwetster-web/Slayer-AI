@@ -84,6 +84,7 @@ const EVENT_TITLE: Record<string, string> = {
 export function formatNotification(kind: 'admin_channel' | 'member_dm', p: Record<string, any>) {
   const title = EVENT_TITLE[p.event] ?? 'Order update';
   const fields = [
+    ...(p.item ? [{ name: 'Item', value: String(p.item).slice(0, 200), inline: false }] : []),
     { name: 'Retailer', value: String(p.retailer), inline: true },
     { name: 'Total', value: formatCents(Number(p.totalCents ?? 0), p.currency ?? 'USD'), inline: true },
     { name: 'Units', value: String(p.units ?? '—'), inline: true },

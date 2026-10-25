@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { Check, Fingerprint, Home, Mail, MapPin, ScanSearch, ShoppingBag, UserPlus, Users, X } from 'lucide-react';
+import { Check, Fingerprint, Home, Mail, MapPin, RefreshCw, ScanSearch, ShoppingBag, UserPlus, Users, X } from 'lucide-react';
 import { useState } from 'react';
 import { formatCents, formatDateTime, relativeTime } from '../../shared/format';
 import type { MatchCandidateRow } from '../../shared/types';
@@ -9,7 +9,7 @@ import { useStore } from '../lib/store';
 import { MemberPicker } from '../components/pickers';
 import { Avatar, Badge, Button, Card, ConfidenceMeter, Empty, MatchBadge, Modal, PageHeader, ProductThumb, Tabs } from '../components/ui';
 
-type Tab = 'queue' | 'unmatched' | 'emails' | 'households' | 'corrections';
+type Tab = 'queue' | 'addresses' | 'unmatched' | 'emails' | 'households' | 'corrections';
 
 const KIND_ICON: Record<string, React.ReactNode> = {
   order_assignment: <ShoppingBag className="size-4" />,
@@ -26,7 +26,10 @@ export function Identity() {
   return (
     <div>
       <PageHeader eyebrow="Identity Intelligence" title="Identity Review" subtitle="Only unique, high-confidence matches are linked automatically. Everything ambiguous waits here with the evidence that produced it." right={
+        <>
+        <Button icon={<RefreshCw className="size-4" />} onClick={async () => { const r = await act(() => call('identity.rematch')); if (r) useStore.getState().toast(`Matched ${r.matched} orders automatically · ${r.review} need review${r.addressesRecovered ? ` · ${r.addressesRecovered} addresses recovered` : ''}`, 'success'); }}>Re-run matching</Button>
         <Button icon={<ScanSearch className="size-4" />} onClick={async () => { const n = await act(() => call('identity.scanDuplicates')); if (n !== undefined) useStore.getState().toast(`${n} possible duplicate member(s) found`, 'info'); }}>Scan for duplicates</Button>
+        </>
       } />
       <div className="mb-5 grid gap-3 sm:grid-cols-3 xl:grid-cols-6">
         {[
@@ -45,12 +48,13 @@ export function Identity() {
         ))}
       </div>
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <Tabs value={tab} onChange={setTab} tabs={[{ id: 'queue', label: 'Review queue', count: disc?.pendingReviews }, { id: 'unmatched', label: 'Unmatched orders' }, { id: 'emails', label: 'New emails' }, { id: 'households', label: 'Shared households' }, { id: 'corrections', label: 'Audit trail' }]} />
+        <Tabs value={tab} onChange={setTab} tabs={[{ id: 'queue', label: 'Review queue', count: disc?.pendingReviews }, { id: 'addresses', label: 'Unmatched by address' }, { id: 'unmatched', label: 'Unmatched orders' }, { id: 'emails', label: 'New emails' }, { id: 'households', label: 'Shared households' }, { id: 'corrections', label: 'Audit trail' }]} />
         {tab === 'queue' && (
           <Tabs value={kind} onChange={setKind} tabs={[{ id: '', label: 'All' }, { id: 'order_assignment', label: 'Orders' }, { id: 'email_link', label: 'Emails' }, { id: 'address_link', label: 'Addresses' }, { id: 'member_merge', label: 'Duplicates' }]} />
         )}
       </div>
       {tab === 'queue' && <Queue kind={kind} />}
+      {tab === 'addresses' && <AddressGroups />}
       {tab === 'unmatched' && <Unmatched />}
       {tab === 'emails' && <NewEmails />}
       {tab === 'households' && <Households />}
@@ -194,5 +198,46 @@ function Corrections() {
       ))}
       {!data?.length && <Empty title="No identity changes yet" />}
     </Card>
+  );
+}
+
+function AddressGroups() {
+  const { data, refetch } = useQuery(() => call('identity.addressGroups'), []);
+  const [picking, setPicking] = useState<{ addressId: number; label: string; orders: number } | null>(null);
+  const act = useAction();
+  const assign = async (addressId: number, memberId: number, name: string, orders: number) => {
+    const r = await act(() => call('identity.assignAddress', addressId, memberId), `${orders} order${orders === 1 ? '' : 's'} assigned to ${name} — future orders to this address will be too`);
+    if (r) refetch();
+  };
+  if (!data) return null;
+  if (!data.length) return <Card><Empty icon={<MapPin className="size-6" />} title="No ownerless orders with an address" body="Orders without a shipping address are listed under Unmatched orders." /></Card>;
+  return (
+    <div className="space-y-2">
+      <p className="text-sm text-ink3">Ownerless orders grouped by the address they ship to. Pick the member once and every order to that address is assigned — and the address is remembered for future orders.</p>
+      <Card className="overflow-hidden">
+        {data.map((g) => {
+          const label = `${g.line1}${g.line2 ? ` ${g.line2}` : ''}, ${g.city}${g.state ? `, ${g.state}` : ''} ${g.postal}`;
+          return (
+            <div key={g.addressId} className="flex flex-wrap items-center gap-3 border-b border-line/50 px-4 py-3 last:border-0">
+              <div className="grid size-9 shrink-0 place-items-center rounded-xl border border-line bg-panel2 text-accent"><Home className="size-4" /></div>
+              <div className="min-w-[260px] flex-1">
+                <div className="text-sm font-medium text-ink">{label}</div>
+                <div className="mt-0.5 text-xs text-ink3">
+                  {g.recipients.length ? `Ship-to names: ${g.recipients.join(', ')}` : 'No recipient name'} · last order {relativeTime(g.lastOrderAt)}
+                </div>
+                {!!g.owners.length && <div className="mt-1 text-xs text-ink2">Known owner{g.owners.length > 1 ? 's' : ''}: {g.owners.map((o) => `${o.name}${o.status === 'verified' ? '' : ' (unverified)'}`).join(', ')}</div>}
+              </div>
+              <Badge tone="warn">{g.orders} order{g.orders === 1 ? '' : 's'}</Badge>
+              <span className="w-24 text-right font-display text-sm font-semibold">{formatCents(g.totalCents, 'USD')}</span>
+              {g.owners.length === 1 && <Button size="sm" variant="primary" icon={<Check className="size-3.5" />} onClick={() => assign(g.addressId, g.owners[0].memberId, g.owners[0].name, g.orders)}>Assign to {g.owners[0].name}</Button>}
+              <Button size="sm" icon={<UserPlus className="size-3.5" />} onClick={() => setPicking({ addressId: g.addressId, label, orders: g.orders })}>{g.owners.length === 1 ? 'Someone else…' : 'Assign to member…'}</Button>
+            </div>
+          );
+        })}
+      </Card>
+      <Modal open={!!picking} onClose={() => setPicking(null)} title={`Whose address is ${picking?.label ?? ''}?`}>
+        <MemberPicker autoFocus onPick={async (m) => { const p = picking!; setPicking(null); await assign(p.addressId, m.id, m.name, p.orders); }} />
+      </Modal>
+    </div>
   );
 }

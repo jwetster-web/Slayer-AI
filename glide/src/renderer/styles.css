@@ -109,3 +109,6 @@ body { margin: 0; background: var(--g-bg); color: var(--g-ink); font-family: var
 @keyframes pulse-dot { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.8); } }
 .pulse-dot { animation: pulse-dot 1.6s ease-in-out infinite; }
 @keyframes scan { 0% { transform: translateY(-100%); } 100% { transform: translateY(100%); } }
+
+/* Studio hue slider: rainbow track with a white ring thumb. */
+.hue-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 9999px; background: transparent; border: 3px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.4); }

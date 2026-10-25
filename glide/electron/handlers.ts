@@ -19,9 +19,11 @@ import { runLoopbackFlow, type OAuthClientConfig, type OAuthProvider } from '../
 import { buildRecapData, type RecapOptions } from '../src/core/export/data';
 import { buildSvg, CANVAS_PRESETS, ffmpegAvailable, type RenderRequest } from '../src/core/export/render';
 import { TEMPLATES, defaultCustomProject, type CustomProject } from '../src/core/export/templates';
+import { assignAddressToMember, unmatchedAddressGroups } from '../src/core/identity/byAddress';
 import { assignOrder, resolveCandidate, scanDuplicateMembers } from '../src/core/identity/matcher';
 import { assignProfile, createProfile, mergeMembers, splitProfiles, upsertMember } from '../src/core/identity/store';
 import { addTrackingEvent } from '../src/core/orders/ingest';
+import { deliveredCandidates, markDelivered, type MarkDeliveredScope } from '../src/core/orders/manualDelivery';
 import { recomputeOrder, refreshSearchText } from '../src/core/orders/state';
 import { addProductImage, CATEGORY_LABEL } from '../src/core/products/catalog';
 import {
@@ -44,6 +46,20 @@ export interface HandlerContext {
   fontDir: string;
   sync: { paused: boolean; lastSyncAt: string | null; setPaused(p: boolean): void; trigger(): void };
   logs: { at: string; level: string; message: string }[];
+  updates: {
+    state(): UpdateInfo;
+    check(): Promise<UpdateInfo>;
+    install(): void;
+  };
+}
+
+export interface UpdateInfo {
+  status: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'none' | 'error';
+  version?: string;
+  percent?: number;
+  error?: string;
+  current: string;
+  packaged: boolean;
 }
 
 const ACTOR = 'admin';
@@ -141,6 +157,7 @@ export function createHandlers(ctx: HandlerContext) {
 
     // -- Orders -------------------------------------------------------------
     'orders.list': (f: OrderFilter) => listOrders(db(), f),
+    'orders.staleCount': (days = 10) => listOrders(db(), { staleDays: days, limit: 1 }).total,
     'orders.get': (id: number) => getOrder(db(), id),
     'orders.assign': (orderId: number, memberId: number | null) => assignOrder(db(), orderId, memberId, ACTOR, settings()),
     'orders.setNotes': (orderId: number, notes: string) => {
@@ -366,6 +383,12 @@ export function createHandlers(ctx: HandlerContext) {
     'identity.discovery': () => discoverySummary(db()),
     'identity.shared': () => sharedAddresses(db()),
     'identity.scanDuplicates': () => scanDuplicateMembers(db()),
+    'updates.state': () => ctx.updates.state(),
+    'updates.check': () => ctx.updates.check(),
+    'updates.install': () => ctx.updates.install(),
+    'identity.addressGroups': () => unmatchedAddressGroups(db()),
+    'identity.assignAddress': (addressId: number, memberId: number) => assignAddressToMember(db(), addressId, memberId, ACTOR, settings()),
+    'identity.rematch': () => ctx.runJob({ type: 'rematch', backfill: true }) as Promise<{ addressesRecovered: number; checked: number; matched: number; review: number }>,
     'identity.recentEmails': () => db().all<{ id: number; address: string; status: string; member: string | null; firstSeen: string }>(
       "SELECT e.id, e.address, e.status, COALESCE(m.display_name, m.username) AS member, e.first_seen AS firstSeen FROM emails e LEFT JOIN members m ON m.id = e.member_id WHERE e.status <> 'verified' ORDER BY e.first_seen DESC LIMIT 200",
     ),
@@ -404,6 +427,11 @@ export function createHandlers(ctx: HandlerContext) {
     // -- Shipping -----------------------------------------------------------
     'shipping.overview': () => shipmentOverview(db()),
     'shipping.refresh': () => ctx.runJob({ type: 'refreshTracking' }),
+    'shipping.markDeliveredPreview': (scope: MarkDeliveredScope) => {
+      const c = deliveredCandidates(db(), scope);
+      return { packages: c.packageIds.length, orders: c.orderIds.length };
+    },
+    'shipping.markDelivered': (scope: MarkDeliveredScope) => markDelivered(db(), scope, ACTOR),
     'products.refreshImages': () => ctx.runJob({ type: 'cacheImages' }),
     'shipping.providers': () => PROVIDERS.map((p) => ({ id: p.id, name: p.name, carriers: p.carriers, configured: cur().secrets.has(`tracking:${p.id}`) })),
     'shipping.saveProvider': (id: string, creds: ProviderCredentials | null) => {
@@ -495,6 +523,8 @@ export function createHandlers(ctx: HandlerContext) {
       if (!c) throw new Error('CSV session expired — choose the file again');
       const r = applyImport(db(), c.csv, mapping, c.filename, ACTOR, kind);
       csvCache.delete(token);
+      // New members / addresses can claim existing orders.
+      if (kind === 'profiles') void ctx.runJob({ type: 'rematch' }).catch(() => undefined);
       return r;
     },
     'csv.batches': () => listImportBatches(db()),

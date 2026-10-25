@@ -221,3 +221,76 @@ describe('product images and delivered status', () => {
     expect(extractItemsFromHtml(parseHtml(html), 'USD').map((i) => i.title)).not.toContain('See all');
   });
 });
+
+describe('mark delivered by hand', () => {
+  it('bulk-marks old shipments delivered, leaves recent ones, and labels it as manual', async () => {
+    const { deliveredCandidates, markDelivered } = await import('../../src/core/orders/manualDelivery');
+    const db = memDb();
+    const mk = async (n: string, trk: string, date: string) => {
+      const s = renderSampleEmail({ retailer: 'target', type: 'shipping', orderNumber: n, date: new Date(date), to: 'b@example.com', items: item, address: addr, taxCents: 0, shippingCents: 0, tracking: [{ number: trk, carrier: 'ups' }] });
+      await ingest(db, s.raw);
+    };
+    const old = new Date(Date.now() - 20 * 86400000).toISOString();
+    const recent = new Date(Date.now() - 2 * 86400000).toISOString();
+    await mk('912003760000001', '1ZWY06570307748706', old);
+    await mk('912003760000002', '1ZWY06570305680630', recent);
+    expect(deliveredCandidates(db, { olderThanDays: 10 }).packageIds).toHaveLength(1);
+    expect(markDelivered(db, { olderThanDays: 10 }, 'test')).toEqual({ packages: 1, orders: 0 });
+    expect(db.all<{ n: string; f: string }>('SELECT order_number n, fulfillment_status f FROM orders ORDER BY n').map((r) => r.f)).toEqual(['delivered', 'shipped']);
+    expect(db.value("SELECT source FROM tracking_events WHERE status = 'delivered'")).toBe('manual');
+    // Running it again changes nothing.
+    expect(markDelivered(db, { olderThanDays: 10 }, 'test')).toEqual({ packages: 0, orders: 0 });
+  });
+});
+
+describe('Shippo tracking', () => {
+  const shippoJson = (status: string) => ({
+    carrier: 'ups', tracking_number: '1ZWY06570307748706', eta: '2026-10-22T20:00:00Z',
+    tracking_status: status === 'DELIVERED' ? { status: 'DELIVERED', status_details: 'Delivered, front door', status_date: '2026-10-22T18:04:00Z', location: { city: 'Ocala', state: 'FL' } } : { status: 'TRANSIT', substatus: { code: 'out_for_delivery' }, status_details: 'Out For Delivery Today', status_date: '2026-10-22T08:00:00Z', location: { city: 'Ocala', state: 'FL' } },
+    tracking_history: [
+      { status: 'PRE_TRANSIT', status_details: 'Shipper created a label', status_date: '2026-10-19T10:00:00Z', location: null },
+      { status: 'TRANSIT', substatus: { code: 'package_departed' }, status_details: 'Departed from Facility', status_date: '2026-10-20T03:00:00Z', location: { city: 'Atlanta', state: 'GA' } },
+    ],
+  });
+
+  it('moves a UPS package through out for delivery to delivered using the Shippo API', async () => {
+    const { refreshDuePackages } = await import('../../src/core/tracking/providers');
+    const db = memDb();
+    const ship = renderSampleEmail({ retailer: 'target', type: 'shipping', orderNumber: '912003760125368', date: new Date('2026-10-19T16:00:00Z'), to: 'b@example.com', items: item, address: addr, taxCents: 0, shippingCents: 0, tracking: [{ number: '1ZWY06570307748706', carrier: 'ups' }] });
+    await ingest(db, ship.raw);
+    const calls: { url: string; auth: string }[] = [];
+    let phase = 'TRANSIT';
+    const fetcher = (async (url: string, init: { headers: Record<string, string> }) => {
+      calls.push({ url, auth: init.headers.Authorization });
+      return new Response(JSON.stringify(shippoJson(phase)), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as never;
+    const creds = (id: string) => (id === 'shippo' ? { apiKey: 'shippo_live_abc' } : null);
+    let r = await refreshDuePackages({ db, credentialsFor: creds, fetcher });
+    expect(r).toMatchObject({ checked: 1, updated: 1, errors: [] });
+    expect(calls[0]).toEqual({ url: 'https://api.goshippo.com/tracks/ups/1ZWY06570307748706', auth: 'ShippoToken shippo_live_abc' });
+    expect(db.value('SELECT status FROM packages')).toBe('out_for_delivery');
+    expect(db.value('SELECT fulfillment_status FROM orders')).toBe('out_for_delivery');
+    phase = 'DELIVERED';
+    db.run('UPDATE packages SET next_check_at = NULL');
+    r = await refreshDuePackages({ db, credentialsFor: creds, fetcher });
+    expect(db.value('SELECT status FROM packages')).toBe('delivered');
+    expect(db.value('SELECT fulfillment_status FROM orders')).toBe('delivered');
+    expect(db.value("SELECT location FROM tracking_events WHERE status = 'delivered' AND source = 'carrier_api'")).toBe('Ocala, FL');
+  });
+
+  it('reports a rejected or test token instead of failing silently', async () => {
+    const { refreshDuePackages } = await import('../../src/core/tracking/providers');
+    const db = memDb();
+    const ship = renderSampleEmail({ retailer: 'target', type: 'shipping', orderNumber: '912003760125369', date: new Date('2026-10-19T16:00:00Z'), to: 'b@example.com', items: item, address: addr, taxCents: 0, shippingCents: 0, tracking: [{ number: '1ZWY06570305680630', carrier: 'ups' }] });
+    await ingest(db, ship.raw);
+    const r = await refreshDuePackages({ db, credentialsFor: (id) => (id === 'shippo' ? { apiKey: 'shippo_test_123' } : null), fetcher: (async () => new Response('{}')) as never });
+    expect(r.errors[0]).toMatch(/test tokens/);
+  });
+});
+
+describe('Target "Delivers to" addresses', () => {
+  it('reads a one-line "Name, Street, City, ST ZIP" address under "Delivers to:"', async () => {
+    const { extractAddress } = await import('../../src/core/parsing/extract');
+    expect(extractAddress(['Shipping', 'Delivers to:', 'Sam Rivera, 10930 17TH PL W, Everett, WA 98204', 'Pokémon Trading Card Game: Booster Bundle'], 'shipping')).toMatchObject({ name: 'Sam Rivera', line1: '10930 17TH PL W', city: 'Everett', state: 'WA', postal: '98204', country: 'US' });
+  });
+});

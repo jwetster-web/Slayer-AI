@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { getSettings } from '../../src/core/workspace';
 import { renderSampleEmail, type SampleEmailSpec } from '../../src/core/sample/retailerEmails';
 import { gmailForward, outlookForward } from '../../src/core/sample/mime';
 import { createProfile, linkEmail, setAddressOwner, upsertAddress, upsertEmail, upsertMember } from '../../src/core/identity/store';
@@ -77,16 +78,23 @@ describe('acceptance scenarios', () => {
     expect(db.value("SELECT status FROM emails WHERE address = 'brand-new@example.com'")).toBe('verified');
   });
 
-  it('Scenario 2b: new email with only a weak signal goes to review instead of auto-linking', async () => {
+  it('Scenario 2b: an unknown email and name shipping to a member-only verified address is assigned by the address', async () => {
     const db = memDb();
-    seedMember(db, { discordId: '223', username: 'ExampleUser', name: 'Jordan Rivers', email: 'old@example.com', address: ADDR });
+    const m = seedMember(db, { discordId: '223', username: 'ExampleUser', name: 'Jordan Rivers', email: 'old@example.com', address: ADDR });
     await ingest(db, renderSampleEmail(spec({ to: 'someone@example.com', address: { ...ADDR, name: 'Casey Stone' } })).raw);
     const o = order(db);
+    expect(o.member_id).toBe(m.memberId);
+    expect(o.match_status).toBe('auto');
+    expect(JSON.parse(o.match_evidence_json).some((e: { signal: string }) => e.signal === 'address')).toBe(true);
+  });
+
+  it('Scenario 2c: only weak signals (a name, no address or email) still go to review', async () => {
+    const db = memDb();
+    seedMember(db, { discordId: '224', username: 'OtherUser', name: 'Jordan Rivers', email: 'old2@example.com', address: { ...ADDR, line1: '9 Elsewhere Rd', postal: '60601', city: 'Chicago' } });
+    await ingest(db, renderSampleEmail(spec({ to: 'someone@example.com', address: { ...ADDR, name: 'Jordan Rivers' } })).raw);
+    const o = order(db);
     expect(o.member_id).toBeNull();
-    expect(o.match_status).toBe('review');
-    const cand = db.get<any>("SELECT * FROM match_candidates WHERE kind = 'order_assignment' AND order_id = ?", [o.id]);
-    expect(cand.status).toBe('pending');
-    expect(JSON.parse(cand.evidence_json).length).toBeGreaterThan(0);
+    expect(['review', 'unmatched']).toContain(o.match_status);
   });
 
   it('Scenario 3: shared household keeps members separate and never double-attributes', async () => {
@@ -197,5 +205,50 @@ describe('acceptance scenarios', () => {
     expect(o.refunded_cents).toBe(gross);
     expect(o.net_cents).toBe(0);
     expect(o.financial_status).toBe('refunded');
+  });
+
+  it('Unmatched by address: one decision assigns every order to that address and future ones too', async () => {
+    const db = memDb();
+    const m = seedMember(db, { discordId: '501', username: 'Casey', name: 'Casey Lane' });
+    const HOME = { name: 'Pat Q', line1: '1815 Carleton Ave', city: 'Bay Shore', state: 'NY', postal: '11706' };
+    for (const n of ['912000000000101', '912000000000102']) await ingest(db, renderSampleEmail(spec({ orderNumber: n, to: 'x@example.com', address: HOME })).raw);
+    const { unmatchedAddressGroups, assignAddressToMember } = await import('../../src/core/identity/byAddress');
+    const groups = unmatchedAddressGroups(db);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].orders).toBe(2);
+    expect(assignAddressToMember(db, groups[0].addressId, m.memberId, 'admin', getSettings(db))).toEqual({ orders: 2 });
+    expect(db.value('SELECT COUNT(*) FROM orders WHERE member_id = ?', [m.memberId])).toBe(2);
+    await ingest(db, renderSampleEmail(spec({ orderNumber: '912000000000103', to: 'y@example.com', address: { ...HOME, name: 'Someone Else' } })).raw);
+    expect(order(db, '912000000000103').member_id).toBe(m.memberId);
+  });
+
+  it('Near-miss address (street typo or wrong ZIP) is suggested for review, never auto-assigned', async () => {
+    const db = memDb();
+    const m = seedMember(db, { discordId: '502', username: 'Jon', name: 'Jon Elias', address: { name: 'Jon Elias', line1: '5312 Poplar Vallley Court', line2: '', city: 'Centreville', state: 'VA', postal: '20120' } });
+    await ingest(db, renderSampleEmail(spec({ orderNumber: '912000000000201', to: 'z@example.com', address: { name: 'Pat Q', line1: '5312 Poplar Valley Ct', city: 'Centreville', state: 'VA', postal: '20120' } })).raw);
+    const o = order(db, '912000000000201');
+    expect(o.member_id).toBeNull();
+    expect(o.match_status).toBe('review');
+    const cand = db.get<any>("SELECT * FROM match_candidates WHERE kind = 'order_assignment' AND order_id = ?", [o.id]);
+    expect(cand.member_id).toBe(m.memberId);
+    expect(cand.evidence_json).toContain('address_similar');
+  });
+
+  it('Discord sync attaches the Discord ID to a member imported by username instead of duplicating them', () => {
+    const db = memDb();
+    const imported = upsertMember(db, { username: 'pikafan' }).id;
+    const synced = upsertMember(db, { discordId: '123456789012345678', username: 'PikaFan' });
+    expect(synced).toEqual({ id: imported, created: false });
+    expect(db.value('SELECT discord_id FROM members WHERE id = ?', [imported])).toBe('123456789012345678');
+    expect(db.value('SELECT COUNT(*) FROM members')).toBe(1);
+  });
+
+  it('Stale filter finds open orders with no update in N days', async () => {
+    const db = memDb();
+    await ingest(db, renderSampleEmail(spec({ orderNumber: '912000000000301', date: new Date(Date.now() - 20 * 86400000) })).raw);
+    await ingest(db, renderSampleEmail(spec({ orderNumber: '912000000000302', date: new Date(Date.now() - 2 * 86400000) })).raw);
+    db.run('UPDATE orders SET last_activity_at = placed_at');
+    const { listOrders } = await import('../../src/core/queries/views');
+    expect(listOrders(db, { staleDays: 10 }).rows.map((r) => r.orderNumber)).toEqual(['912000000000301']);
   });
 });

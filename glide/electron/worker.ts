@@ -17,6 +17,7 @@ import { loadTemplates, processRawMessage, readRawMessage, type MessageRef } fro
 import { EventSink } from '../src/core/events';
 import { buildRecapData, type RecapOptions } from '../src/core/export/data';
 import { renderExport, renderMp4, setFontDir, type RenderRequest } from '../src/core/export/render';
+import { addressBackfillDone, backfillOrderAddresses, markAddressBackfillDone, rekeyAddresses, rematchOrders } from '../src/core/identity/rematch';
 import { borrowImagesByTitle, imageRepairDone, repairProductImages } from '../src/core/products/repair';
 import { cacheProductImages, cacheFileName, httpImageFetcher } from '../src/core/products/images';
 import { generateSampleWorkspace } from '../src/core/sample/generator';
@@ -202,6 +203,7 @@ async function handle(job: WorkerJob): Promise<unknown> {
         n += r.recovered + r.removedJunk;
       }
       n += borrowImagesByTitle(db);
+      if (!addressBackfillDone(db)) void handle({ type: 'rematch' });
       if (getSettings(db).fetchRemoteProductImages) n += await cacheProductImages(db, init.imageDir, httpImageFetcher, 120);
       await cacheMemberAvatars();
       if (n) changed('products', 'orders');
@@ -210,6 +212,7 @@ async function handle(job: WorkerJob): Promise<unknown> {
     case 'refreshTracking': {
       const sink = new EventSink();
       const r = await refreshDuePackages({ db, sink, credentialsFor: (id) => secrets.getJson<ProviderCredentials>(`tracking:${id}`) });
+      for (const e of r.errors) emit({ kind: 'log', level: 'warn', message: `tracking: ${e}` });
       await afterEvents(sink);
       if (r.updated) changed('orders', 'shipping', 'activity');
       return r;
@@ -220,6 +223,15 @@ async function handle(job: WorkerJob): Promise<unknown> {
     }
     case 'reprocessFailed':
       return reprocessFailed();
+    case 'rematch': {
+      const keys = rekeyAddresses(db);
+      const filled = job.backfill || !addressBackfillDone(db) ? await backfillOrderAddresses(db, cipher) : 0;
+      markAddressBackfillDone(db);
+      const r = rematchOrders(db, getSettings(db));
+      emit({ kind: 'log', level: 'info', message: `matching: ${filled} order addresses recovered; addresses ${JSON.stringify(keys)}; ${JSON.stringify(r)}` });
+      changed('orders', 'identity', 'members');
+      return { addressesRecovered: filled, ...r };
+    }
     case 'render': {
       await cacheMemberAvatars();
       const data = buildRecapData(db, job.filter as OrderFilter, getSettings(db), { ...(job.recap as RecapOptions), imageDir: init.imageDir });

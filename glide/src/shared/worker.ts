@@ -12,7 +12,8 @@ export type WorkerJob =
   | { type: 'cacheImages' }
   | { type: 'refreshTracking' }
   | { type: 'flushOutbox' }
-  | { type: 'reprocessFailed' };
+  | { type: 'reprocessFailed' }
+  | { type: 'rematch'; backfill?: boolean };
 
 export interface WorkerInit {
   dbPath: string;

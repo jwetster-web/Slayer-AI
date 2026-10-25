@@ -55,6 +55,7 @@ export function Overview() {
   return (
     <div>
       <PageHeader eyebrow="Command Center" title={`${settings?.brandName ?? 'PokeSlayerz'} Overview`} subtitle="Every checkout, shipment and member across your inboxes — updated live as emails arrive." right={<RangePicker value={range} onChange={setRange} options={['today', '7d', '30d', '90d', 'all']} />} />
+      <StaleNotice />
 
       <div className="grid gap-4 xl:grid-cols-[1.35fr_1fr]">
         <Card glow className="relative overflow-hidden p-6">
@@ -184,3 +185,14 @@ function KpiNumber({ value, format }: { value: number; format: (n: number) => st
 }
 
 import { AnimatedNumber as AnimatedValue } from '../components/ui';
+
+function StaleNotice() {
+  const { data: stale } = useQuery(() => call('orders.staleCount', 10), []);
+  if (!stale) return null;
+  return (
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warn/30 bg-warn/10 px-4 py-3 text-sm text-warn">
+      <span><b>{stale}</b> open order{stale === 1 ? ' has' : 's have'} had no email or tracking update in 10+ days — they may have been canceled silently, be stuck in transit, or already delivered without a scan.</span>
+      <Button size="sm" onClick={() => useStore.getState().navigate('orders', { orderFilter: { staleDays: 10 } })}>Review them</Button>
+    </div>
+  );
+}

@@ -58,10 +58,11 @@ export function hsl(h: number, s: number, l: number): string {
   return '#' + [f(0), f(8), f(4)].map((x) => Math.round(x * 255).toString(16).padStart(2, '0')).join('');
 }
 
-export function palette(accent: string): Palette {
-  const [h] = hexToHsl(accent);
+/** `hueOverride` (0–360) recolors the whole palette from the Studio color slider instead of the brand accent. */
+export function palette(accent: string, hueOverride?: number): Palette {
+  const h = hueOverride === undefined ? hexToHsl(accent)[0] : ((Math.round(hueOverride) % 360) + 360) % 360;
   return {
-    accent: /^#[0-9a-f]{6}$/i.test(accent) ? accent : hsl(h, 90, 65),
+    accent: hueOverride === undefined && /^#[0-9a-f]{6}$/i.test(accent) ? accent : hsl(h, 90, 65),
     accent2: hsl((h + 330) % 360, 90, 68),
     accent3: hsl((h + 50) % 360, 88, 70),
     hot: hsl((h + 110) % 360, 90, 62),

@@ -3,6 +3,7 @@ import { join, normalize, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { app, BrowserWindow, ipcMain, net, protocol, safeStorage, shell } from 'electron';
+import { autoUpdater } from 'electron-updater';
 import { backupNow, listBackups } from '../src/core/backup';
 import { getSettings } from '../src/core/workspace';
 import { listRules } from '../src/core/automation/rules';
@@ -182,6 +183,34 @@ async function tick(force = false) {
   }
 }
 
+// In-app updates from GitHub Releases (packaged builds only). Downloads in the background and
+// installs on the next quit, or right away when the user clicks Restart.
+export const updateState: { status: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'none' | 'error'; version?: string; percent?: number; error?: string } = { status: 'idle' };
+function startUpdater() {
+  if (!app.isPackaged) return;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  const set = (patch: Partial<typeof updateState>) => {
+    Object.assign(updateState, patch);
+    send({ kind: 'update', ...updateState });
+  };
+  autoUpdater.on('checking-for-update', () => set({ status: 'checking', error: undefined }));
+  autoUpdater.on('update-available', (i) => set({ status: 'available', version: i.version }));
+  autoUpdater.on('update-not-available', () => set({ status: 'none' }));
+  autoUpdater.on('download-progress', (p) => set({ status: 'downloading', percent: Math.round(p.percent) }));
+  autoUpdater.on('update-downloaded', (i) => {
+    set({ status: 'ready', version: i.version });
+    log('info', `update ${i.version} downloaded; installs on restart`);
+  });
+  autoUpdater.on('error', (e) => {
+    set({ status: 'error', error: e.message.slice(0, 200) });
+    log('warn', `update check failed: ${e.message}`);
+  });
+  const check = () => void autoUpdater.checkForUpdates().catch(() => undefined);
+  setTimeout(check, 20000);
+  setInterval(check, 6 * 3600000);
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1520,
@@ -243,6 +272,15 @@ app.whenReady().then(async () => {
     fontDir: join(resourcesDir(), 'fonts'),
     sync: syncState,
     logs,
+    updates: {
+      state: () => ({ ...updateState, current: app.getVersion(), packaged: app.isPackaged }),
+      check: async () => {
+        if (!app.isPackaged) return { ...updateState, current: app.getVersion(), packaged: false };
+        await autoUpdater.checkForUpdates().catch(() => undefined);
+        return { ...updateState, current: app.getVersion(), packaged: true };
+      },
+      install: () => autoUpdater.quitAndInstall(false, true),
+    },
   };
   handlers = createHandlers(ctx);
 
@@ -252,7 +290,7 @@ app.whenReady().then(async () => {
     if (!fn) throw new Error(`unknown channel ${channel}`);
     try {
       const out = await fn(...args);
-      if (/\.(assign|correct|addTracking|setNotes|merge|split|forget|resolve|apply|rollback|update|create|setImage|remove|add|delete|scanDuplicates|syncMembers|setPrimaryImage|importSignups)$/.test(channel)) send({ kind: 'dataChanged', scope: [channel.split('.')[0]] });
+      if (/\.(assign|correct|addTracking|setNotes|merge|split|forget|resolve|apply|rollback|update|create|setImage|remove|add|delete|scanDuplicates|syncMembers|setPrimaryImage|importSignups|markDelivered|assignAddress)$/.test(channel)) send({ kind: 'dataChanged', scope: [channel.split('.')[0]] });
       return out;
     } catch (e) {
       log('warn', `${channel}: ${(e as Error).message}`);
@@ -267,6 +305,7 @@ app.whenReady().then(async () => {
     log('error', `could not open last workspace: ${(e as Error).message}`);
   }
   createWindow();
+  startUpdater();
   setInterval(() => void tick(), 15000);
   setTimeout(() => void tick(), 4000);
 

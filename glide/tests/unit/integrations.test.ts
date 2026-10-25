@@ -89,7 +89,7 @@ describe('carrier tracking', () => {
     db.run("INSERT INTO orders (id, retailer_id, order_number, placed_at, currency, last_activity_at, created_at, updated_at) VALUES (1, 'target', 'X', '2026', 'USD', '2026', '2026', '2026')");
     db.run("INSERT INTO packages (order_id, tracking_number, carrier, status, created_at) VALUES (1, '1Z999AA10123456784', 'ups', 'in_transit', '2026')");
     const r = await refreshDuePackages({ db, credentialsFor: () => null });
-    expect(r).toEqual({ checked: 0, updated: 0, skipped: 1 });
+    expect(r).toEqual({ checked: 0, updated: 0, skipped: 1, errors: [] });
     expect(db.value('SELECT status FROM packages')).toBe('in_transit');
   });
 });

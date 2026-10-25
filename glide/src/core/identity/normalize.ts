@@ -26,6 +26,8 @@ const SUFFIX: Record<string, string> = {
   WALK: 'WALK', WAY: 'WAY', WELLS: 'WLS',
 };
 
+const SUFFIX_ABBR = new Set(Object.values(SUFFIX));
+
 const DIRECTION: Record<string, string> = {
   NORTH: 'N', SOUTH: 'S', EAST: 'E', WEST: 'W', NORTHEAST: 'NE', NORTHWEST: 'NW', SOUTHEAST: 'SE', SOUTHWEST: 'SW',
 };
@@ -96,9 +98,12 @@ function normalizePostal(postal: string, country: string): string {
 function normalizeStreetTokens(tokens: string[]): string[] {
   return tokens.map((t, i) => {
     if (DIRECTION[t]) return DIRECTION[t];
-    // Only the last word (or one before a trailing direction) is a suffix.
-    const isSuffixPosition = i === tokens.length - 1 || (i === tokens.length - 2 && DIRECTION[tokens[i + 1]] !== undefined) ||
-      (i === tokens.length - 2 && ['N', 'S', 'E', 'W', 'NE', 'NW', 'SE', 'SW'].includes(tokens[i + 1]));
+    // Only the last word (or one before a trailing direction) is a suffix — plus, on numbered streets, a street-type
+    // word directly followed by another one ("29TH AVENUE RD", "143RD LANE RD"). "POPLAR VALLEY CT" keeps VALLEY.
+    const next = tokens[i + 1];
+    const isSuffixPosition = i === tokens.length - 1 || (i === tokens.length - 2 && DIRECTION[next] !== undefined) ||
+      (i === tokens.length - 2 && ['N', 'S', 'E', 'W', 'NE', 'NW', 'SE', 'SW'].includes(next)) ||
+      (i > 0 && /^\d+(ST|ND|RD|TH)?$/.test(tokens[i - 1]) && next !== undefined && (SUFFIX[next] !== undefined || SUFFIX_ABBR.has(next)));
     if (isSuffixPosition && SUFFIX[t]) return SUFFIX[t];
     return t;
   });

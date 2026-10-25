@@ -221,6 +221,7 @@ export function Shell({ children }: { children: ReactNode }) {
           <WorkspaceMenu />
           <WindowControls />
         </header>
+        <UpdateBanner />
         <main className="relative flex-1 overflow-y-auto">
           <AnimatePresence mode="wait">
             <motion.div key={page} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }} className="mx-auto max-w-[1600px] px-7 py-7">
@@ -265,6 +266,23 @@ export function WindowControls({ className }: { className?: string }) {
       <button aria-label="Close" title="Close" onClick={() => void call('window.close')} className={cx(btn, 'hover:bg-bad hover:text-white hover:shadow-[0_0_18px_-4px_var(--g-bad)]')}>
         <X className="size-4" />
       </button>
+    </div>
+  );
+}
+
+function UpdateBanner() {
+  const [u, setU] = useState<{ status: string; version?: string; percent?: number } | null>(null);
+  useEffect(() => {
+    void call('updates.state').then(setU).catch(() => undefined);
+    return window.glide?.on((e: any) => e.kind === 'update' && setU(e));
+  }, []);
+  if (!u || (u.status !== 'ready' && u.status !== 'downloading')) return null;
+  return (
+    <div className="relative z-10 flex items-center justify-between gap-3 border-b border-accent/30 bg-accent/10 px-7 py-2 text-sm text-ink">
+      <span>{u.status === 'ready' ? `GLIDE ${u.version} is ready to install.` : `Downloading GLIDE ${u.version ?? 'update'}… ${u.percent ?? 0}%`}</span>
+      {u.status === 'ready' && (
+        <button onClick={() => void call('updates.install')} className="focus-ring rounded-lg bg-accent px-3 py-1 text-xs font-semibold text-white hover:brightness-110">Restart to update</button>
+      )}
     </div>
   );
 }
