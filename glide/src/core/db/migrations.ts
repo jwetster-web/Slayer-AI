@@ -587,4 +587,12 @@ DELETE FROM source_messages WHERE uid IS NOT NULL AND order_id IS NULL AND parse
 UPDATE sync_checkpoints SET last_uid = 0;
 `,
   },
+  {
+    // Matching no longer trusts purchase emails and auto-assigns above 50%.
+    version: 4,
+    sql: `
+UPDATE settings SET value_json = '0.51' WHERE key = 'autoMatchThreshold' AND CAST(value_json AS REAL) > 0.51;
+DELETE FROM workspace_meta WHERE key IN ('address_backfill_v2');
+`,
+  },
 ];

@@ -1,3 +1,4 @@
+import { assignOrder } from '../../src/core/identity/matcher';
 import { describe, expect, it } from 'vitest';
 import { applyImport, parseCsv, previewImport, rollbackImport } from '../../src/core/csv/importer';
 import { exportOrdersCsv, memberInvoice, toCsv } from '../../src/core/csv/exporter';
@@ -84,7 +85,9 @@ describe('exports and backups', () => {
     expect(out.startsWith('﻿')).toBe(true);
     expect(out).toContain('912000000000222');
     const memberId = db.value<number>('SELECT id FROM members')!;
-    expect(db.value('SELECT member_id FROM orders')).toBe(memberId);
+    // Checkout emails are not identifiers, so the imported order is assigned by hand here.
+    expect(db.value('SELECT member_id FROM orders')).toBeNull();
+    assignOrder(db, db.value<number>('SELECT id FROM orders')!, memberId, 'admin');
     const inv = memberInvoice(db, memberId);
     expect(inv.totals.USD).toBe(9998);
     expect(inv.csv).toContain('123456789012345678');

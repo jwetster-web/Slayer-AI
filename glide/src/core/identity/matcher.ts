@@ -56,7 +56,7 @@ interface OrderFacts {
   email_account_id: number | null;
 }
 
-export function gatherCandidates(db: Db, o: OrderFacts): Candidate[] {
+export function gatherCandidates(db: Db, o: OrderFacts, opts: { useEmail?: boolean } = {}): Candidate[] {
   const map = new Map<number, Candidate>();
   const add = (memberId: number, signal: string, detail: string, weight: number) => {
     let c = map.get(memberId);
@@ -74,8 +74,8 @@ export function gatherCandidates(db: Db, o: OrderFacts): Candidate[] {
   };
   const live = (id: number | null) => (id ? db.value<number | null>('SELECT merged_into_id FROM members WHERE id = ?', [id]) ?? id : null);
 
-  // Email evidence
-  if (o.purchase_email) {
+  // Email evidence (only when enabled — rotated checkout emails say nothing about who the buyer is)
+  if (opts.useEmail && o.purchase_email) {
     const email = o.purchase_email.toLowerCase();
     const row = db.get<{ member_id: number | null; status: string }>('SELECT member_id, status FROM emails WHERE address = ?', [email]);
     if (row?.member_id) {
@@ -169,7 +169,8 @@ export function decide(cands: Candidate[], settings: Pick<AppSettings, 'autoMatc
   const [top, second] = cands;
   if (!top) return { status: 'unmatched', memberId: null, confidence: 0, candidates: cands, reason: 'no linked evidence' };
   const margin = top.score - (second?.score ?? 0);
-  if (top.score >= settings.autoMatchThreshold && margin >= 0.25 && (second?.score ?? 0) < 0.5) {
+  // Auto-assign the clear leader: at or above the threshold and no runner-up also above it.
+  if (top.score >= settings.autoMatchThreshold && margin >= 0.1 && (second?.score ?? 0) < settings.autoMatchThreshold) {
     return { status: 'auto', memberId: top.memberId, confidence: top.score, candidates: cands, reason: 'high confidence, unique' };
   }
   if (top.score >= settings.reviewThreshold) {
@@ -179,7 +180,7 @@ export function decide(cands: Candidate[], settings: Pick<AppSettings, 'autoMatc
   return { status: 'unmatched', memberId: null, confidence: top.score, candidates: cands, reason: 'evidence too weak' };
 }
 
-function chooseProfile(db: Db, memberId: number, o: OrderFacts, autoCreate: boolean, actor: string): number | null {
+function chooseProfile(db: Db, memberId: number, o: OrderFacts, autoCreate: boolean, actor: string, useEmail = false): number | null {
   const nk = nameKey(o.recipient_name);
   const profiles = db.all<{ id: number; name_key: string | null }>('SELECT id, name_key FROM profiles WHERE member_id = ?', [memberId]);
   if (o.shipping_address_id) {
@@ -189,7 +190,7 @@ function chooseProfile(db: Db, memberId: number, o: OrderFacts, autoCreate: bool
   }
   const byName = profiles.find((p) => p.name_key && nk.key && p.name_key === nk.key);
   if (byName) return byName.id;
-  if (o.purchase_email) {
+  if (useEmail && o.purchase_email) {
     const viaEmail = db.value<number | null>('SELECT profile_id FROM emails WHERE address = ? AND member_id = ?', [o.purchase_email, memberId]);
     if (viaEmail) return viaEmail;
   }
@@ -226,7 +227,7 @@ function upsertCandidate(db: Db, c: {
 
 /** Applies what an assignment teaches us: emails and addresses become proposed (auto) or verified (manual). */
 function learn(db: Db, memberId: number, profileId: number | null, o: OrderFacts, verified: boolean, confidence: number, settings: AppSettings, actor: string) {
-  if (o.purchase_email) {
+  if (settings.matchByPurchaseEmail && o.purchase_email) {
     const emailId = upsertEmail(db, o.purchase_email);
     if (emailId) {
       const row = db.get<{ member_id: number | null; status: string }>('SELECT member_id, status FROM emails WHERE id = ?', [emailId])!;
@@ -270,11 +271,11 @@ export function matchOrder(db: Db, orderId: number, settings: AppSettings = DEFA
   if (locked) return null;
   const o = orderFacts(db, orderId);
   if (!o) return null;
-  const cands = gatherCandidates(db, o);
+  const cands = gatherCandidates(db, o, { useEmail: settings.matchByPurchaseEmail });
   const d = decide(cands, settings);
   const evidenceJson = JSON.stringify(d.candidates[0]?.evidence ?? []);
   if (d.status === 'auto') {
-    const profileId = chooseProfile(db, d.memberId!, o, true, actor);
+    const profileId = chooseProfile(db, d.memberId!, o, true, actor, settings.matchByPurchaseEmail);
     db.run('UPDATE orders SET member_id = ?, profile_id = ?, match_status = ?, match_confidence = ?, match_evidence_json = ?, updated_at = ? WHERE id = ?', [d.memberId, profileId, 'auto', d.confidence, evidenceJson, now(), orderId]);
     db.run("UPDATE match_candidates SET status = 'superseded', resolved_at = ? WHERE kind = 'order_assignment' AND order_id = ? AND status = 'pending'", [now(), orderId]);
     learn(db, d.memberId!, profileId, o, false, d.confidence, settings, actor);
@@ -301,7 +302,7 @@ export function assignOrder(db: Db, orderId: number, memberId: number | null, ac
     if (memberId === null) {
       db.run("UPDATE orders SET member_id = NULL, profile_id = NULL, match_status = 'unmatched', match_locked = 1, match_confidence = NULL, updated_at = ? WHERE id = ?", [now(), orderId]);
     } else {
-      const pid = profileId ?? chooseProfile(db, memberId, o, true, actor);
+      const pid = profileId ?? chooseProfile(db, memberId, o, true, actor, settings.matchByPurchaseEmail);
       db.run("UPDATE orders SET member_id = ?, profile_id = ?, match_status = 'verified', match_locked = 1, match_confidence = 1, updated_at = ? WHERE id = ?", [memberId, pid, now(), orderId]);
       learn(db, memberId, pid, o, true, 1, settings, actor);
     }

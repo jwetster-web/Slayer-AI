@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync } from 'node:fs';
-import { join, normalize, resolve, sep } from 'node:path';
+import { appendFileSync, existsSync, mkdirSync, renameSync, statSync } from 'node:fs';
+import { dirname, join, normalize, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { app, BrowserWindow, ipcMain, net, protocol, safeStorage, shell } from 'electron';
@@ -58,9 +58,22 @@ const syncState = { paused: false, lastSyncAt: null as string | null, setPaused:
 
 const resourcesDir = () => (app.isPackaged ? join(process.resourcesPath, 'resources') : join(app.getAppPath(), 'resources'));
 
+// Also kept on disk (userData/logs/main.log, ~1 MB with one rotation) so startup problems can be read after GLIDE closes.
+function logFile(): string {
+  return join(app.getPath('userData'), 'logs', 'main.log');
+}
 function log(level: 'info' | 'warn' | 'error', message: string) {
-  logs.push({ at: new Date().toISOString(), level, message: message.slice(0, 500) });
+  const at = new Date().toISOString();
+  logs.push({ at, level, message: message.slice(0, 500) });
   if (logs.length > 1000) logs.splice(0, logs.length - 1000);
+  try {
+    const f = logFile();
+    mkdirSync(dirname(f), { recursive: true });
+    if (existsSync(f) && statSync(f).size > 1_000_000) renameSync(f, `${f}.1`);
+    appendFileSync(f, `${at} ${level.toUpperCase()} ${message.slice(0, 2000)}\n`);
+  } catch {
+    // logging must never break the app
+  }
 }
 
 function send(event: WorkerEvent | { kind: string; [k: string]: unknown }) {
@@ -320,7 +333,9 @@ app.whenReady().then(async () => {
     }
   });
 
-  await openLastWorkspace();
+  log('info', `GLIDE ${app.getVersion()} starting · userData ${userData} · workspaces ${JSON.stringify(ws.list().map((w) => w.id))}`);
+  const opened = await openLastWorkspace();
+  log(opened ? 'info' : 'error', opened ? `opened workspace ${ws.current?.info.id}` : `no workspace open at startup: ${startup.error ?? 'no last workspace recorded'}`);
   createWindow();
   startUpdater();
   setInterval(() => void tick(), 15000);
@@ -332,6 +347,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('second-instance', () => {
+  log('info', 'second launch focused the running window');
   if (win) {
     if (win.isMinimized()) win.restore();
     win.focus();

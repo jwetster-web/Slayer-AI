@@ -1,6 +1,6 @@
 {
   "name": "glide",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "GLIDE — PokeSlayerz Order Command Center: desktop order intelligence for cook groups.",
   "main": "dist-electron/main.cjs",
   "scripts": {

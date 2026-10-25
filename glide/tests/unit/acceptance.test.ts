@@ -63,19 +63,22 @@ describe('acceptance scenarios', () => {
     expect(r.sink.events.some((e) => e.kind === 'match_auto')).toBe(true);
   });
 
-  it('Scenario 2: new email for an existing buyer links the order and proposes the email for review', async () => {
+  it('Scenario 2: purchase emails are not identifiers — the order matches by address and the email is not tied to the buyer', async () => {
     const db = memDb();
     const { memberId } = seedMember(db, { discordId: '222', username: 'ExampleUser', name: 'Jordan Rivers', email: 'old@example.com', address: ADDR });
     await ingest(db, renderSampleEmail(spec({ to: 'brand-new@example.com' })).raw);
     const o = order(db);
     expect(o.member_id).toBe(memberId);
-    const email = db.get<any>("SELECT * FROM emails WHERE address = 'brand-new@example.com'");
-    expect(email.member_id).toBe(memberId);
-    expect(email.status).toBe('proposed');
-    const cand = db.get<any>("SELECT * FROM match_candidates WHERE kind = 'email_link' AND status = 'pending'");
-    expect(cand.member_id).toBe(memberId);
-    resolveCandidate(db, cand.id, true, 'admin');
-    expect(db.value("SELECT status FROM emails WHERE address = 'brand-new@example.com'")).toBe('verified');
+    expect(JSON.parse(o.match_evidence_json).some((e: { signal: string }) => e.signal.startsWith('email'))).toBe(false);
+    expect(db.value("SELECT member_id FROM emails WHERE address = 'brand-new@example.com'") ?? null).toBeNull();
+    expect(db.value("SELECT COUNT(*) FROM match_candidates WHERE kind = 'email_link'")).toBe(0);
+  });
+
+  it('Scenario 2a: a member\'s own (rotated) checkout email at an unknown address does not assign the order to them', async () => {
+    const db = memDb();
+    seedMember(db, { discordId: '221', username: 'Rotator', name: 'Sam Lee', email: 'drop-account@example.com', address: ADDR });
+    await ingest(db, renderSampleEmail(spec({ to: 'drop-account@example.com', address: { ...ADDR, name: 'Pat Doe', line1: '9 Elsewhere Rd', postal: '60601', city: 'Chicago' } })).raw);
+    expect(order(db).member_id).toBeNull();
   });
 
   it('Scenario 2b: an unknown email and name shipping to a member-only verified address is assigned by the address', async () => {
@@ -88,20 +91,20 @@ describe('acceptance scenarios', () => {
     expect(JSON.parse(o.match_evidence_json).some((e: { signal: string }) => e.signal === 'address')).toBe(true);
   });
 
-  it('Scenario 2c: only weak signals (a name, no address or email) still go to review', async () => {
+  it('Scenario 2c: a match over 50% (exact profile name, new address) is auto-assigned', async () => {
     const db = memDb();
-    seedMember(db, { discordId: '224', username: 'OtherUser', name: 'Jordan Rivers', email: 'old2@example.com', address: { ...ADDR, line1: '9 Elsewhere Rd', postal: '60601', city: 'Chicago' } });
+    const m = seedMember(db, { discordId: '224', username: 'OtherUser', name: 'Jordan Rivers', email: 'old2@example.com', address: { ...ADDR, line1: '9 Elsewhere Rd', postal: '60601', city: 'Chicago' } });
     await ingest(db, renderSampleEmail(spec({ to: 'someone@example.com', address: { ...ADDR, name: 'Jordan Rivers' } })).raw);
     const o = order(db);
-    expect(o.member_id).toBeNull();
-    expect(['review', 'unmatched']).toContain(o.match_status);
+    expect(o.member_id).toBe(m.memberId);
+    expect(o.match_status).toBe('auto');
   });
 
   it('Scenario 3: shared household keeps members separate and never double-attributes', async () => {
     const db = memDb();
     const a = seedMember(db, { discordId: '301', username: 'Alex', name: 'Alex Rivers', email: 'alex@example.com', address: ADDR });
     const b = seedMember(db, { discordId: '302', username: 'Blair', name: 'Blair Rivers', email: 'blair@example.com', address: ADDR });
-    // Alex orders with Alex's verified email → Alex.
+    // Alex's name at the shared address → Alex.
     await ingest(db, renderSampleEmail(spec({ orderNumber: '912000000000001', to: 'alex@example.com', address: { ...ADDR, name: 'Alex Rivers' } })).raw);
     expect(order(db, '912000000000001').member_id).toBe(a.memberId);
     // Unknown email, unknown name, shared address → review, not assigned to both.
@@ -109,14 +112,11 @@ describe('acceptance scenarios', () => {
     const o2 = order(db, '912000000000002');
     expect(o2.member_id).toBeNull();
     expect(['review', 'unmatched']).toContain(o2.match_status);
-    // Blair's name at the shared address with an unknown email → proposed Blair, needs review.
+    // Blair's name at the shared address → Blair (over 50%, and Alex is well behind).
     await ingest(db, renderSampleEmail(spec({ orderNumber: '912000000000003', to: 'other@example.com', address: { ...ADDR, name: 'Blair Rivers' } })).raw);
-    const o3 = order(db, '912000000000003');
-    expect(o3.member_id).toBeNull();
-    const c = db.get<any>("SELECT * FROM match_candidates WHERE order_id = ? AND kind = 'order_assignment'", [o3.id]);
-    expect(c.member_id).toBe(b.memberId);
-    // Each order belongs to at most one member.
-    expect(db.value<number>('SELECT COUNT(*) FROM orders WHERE member_id IS NOT NULL')).toBe(1);
+    expect(order(db, '912000000000003').member_id).toBe(b.memberId);
+    // Each order belongs to exactly one member; the stranger's order to nobody.
+    expect(db.value<number>('SELECT COUNT(*) FROM orders WHERE member_id IS NOT NULL')).toBe(2);
   });
 
   it('Scenario 4: duplicate forwarding yields one canonical order with multiple sources', async () => {

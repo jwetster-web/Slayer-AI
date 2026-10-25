@@ -556,6 +556,8 @@ export interface AppSettings {
   reviewThreshold: number;
   autoLinkNewEmails: boolean;
   autoLinkEmailThreshold: number;
+  /** Purchase emails identify members. Off by default: cook groups rotate checkout emails between people every drop. */
+  matchByPurchaseEmail: boolean;
   storeRawEmails: boolean;
   encryptRawEmails: boolean;
   fetchRemoteProductImages: boolean;
@@ -576,10 +578,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   reducedMotion: 'system',
   soundEffects: false,
   pollIntervalSec: 120,
-  autoMatchThreshold: 0.9,
+  autoMatchThreshold: 0.51,
   reviewThreshold: 0.35,
   autoLinkNewEmails: false,
   autoLinkEmailThreshold: 0.97,
+  matchByPurchaseEmail: false,
   storeRawEmails: true,
   encryptRawEmails: true,
   fetchRemoteProductImages: true,
