@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { app, BrowserWindow, ipcMain, net, protocol, safeStorage, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
+import { redact } from '../src/core/audit';
 import { backupNow, listBackups } from '../src/core/backup';
 import { getSettings } from '../src/core/workspace';
 import { listRules } from '../src/core/automation/rules';
@@ -70,7 +71,11 @@ function log(level: 'info' | 'warn' | 'error', message: string) {
     const f = logFile();
     mkdirSync(dirname(f), { recursive: true });
     if (existsSync(f) && statSync(f).size > 1_000_000) renameSync(f, `${f}.1`);
-    appendFileSync(f, `${at} ${level.toUpperCase()} ${message.slice(0, 2000)}\n`);
+    // The file outlives the session and isn't encrypted: strip emails, addresses, phones and tokens first.
+    const safe = redact(message, 500)
+      .replace(/\b(?:shippo_(?:live|test)_|oauth\.|sk_|pk_|ghp_|xox[abp]-)[A-Za-z0-9._-]+/g, '[token]')
+      .replace(/(https?:\/\/[^\s?#]+)\?[^\s]*/g, '$1?[query]');
+    appendFileSync(f, `${at} ${level.toUpperCase()} ${safe}\n`);
   } catch {
     // logging must never break the app
   }
