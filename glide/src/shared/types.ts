@@ -427,8 +427,6 @@ export interface OrderFilter {
   match?: MatchStatus[];
   from?: ISODate;
   to?: ISODate;
-  /** Open orders whose last email or tracking update is at least this many days old. */
-  staleDays?: number;
   sort?: 'placed_desc' | 'placed_asc' | 'total_desc' | 'total_asc' | 'activity_desc';
   limit?: number;
   offset?: number;

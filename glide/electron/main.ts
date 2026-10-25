@@ -202,12 +202,14 @@ async function tick(force = false) {
 }
 
 // In-app updates from GitHub Releases (packaged builds only). Downloads in the background and
-// installs on the next quit, or right away when the user clicks Restart.
+// installs when the user clicks Restart.
 export const updateState: { status: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'none' | 'error'; version?: string; percent?: number; error?: string } = { status: 'idle' };
 function startUpdater() {
   if (!app.isPackaged) return;
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  // Installing silently on quit replaced files while GLIDE could be relaunched mid-install;
+  // the update is installed only when the user clicks Restart (the installer then reopens GLIDE).
+  autoUpdater.autoInstallOnAppQuit = false;
   const set = (patch: Partial<typeof updateState>) => {
     Object.assign(updateState, patch);
     send({ kind: 'update', ...updateState });

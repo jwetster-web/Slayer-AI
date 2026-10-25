@@ -163,7 +163,6 @@ export function createHandlers(ctx: HandlerContext) {
 
     // -- Orders -------------------------------------------------------------
     'orders.list': (f: OrderFilter) => listOrders(db(), f),
-    'orders.staleCount': (days = 10) => listOrders(db(), { staleDays: days, limit: 1 }).total,
     'orders.get': (id: number) => getOrder(db(), id),
     'orders.assign': (orderId: number, memberId: number | null) => assignOrder(db(), orderId, memberId, ACTOR, settings()),
     'orders.setNotes': (orderId: number, notes: string) => {

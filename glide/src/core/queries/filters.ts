@@ -34,14 +34,6 @@ export function orderWhere(f: OrderFilter = {}): Where {
     parts.push('o.placed_at < ?');
     params.push(f.to);
   }
-  if (f.staleDays && f.staleDays > 0) {
-    // Still open, and neither the order nor any of its packages has heard anything since the cutoff.
-    const cutoff = new Date(Date.now() - f.staleDays * 86400000).toISOString();
-    parts.push("o.fulfillment_status IN ('ordered','shipped','partially_shipped','backordered','delayed','exception') AND o.cancel_state <> 'full'");
-    parts.push('COALESCE(o.last_activity_at, o.placed_at, o.created_at) <= ?');
-    parts.push("NOT EXISTS (SELECT 1 FROM packages pk WHERE pk.order_id = o.id AND COALESCE(pk.last_event_at, pk.created_at) > ? AND pk.status NOT IN ('delivered','returned'))");
-    params.push(cutoff, cutoff);
-  }
   if (f.search?.trim()) {
     for (const term of f.search.trim().toLowerCase().split(/\s+/).slice(0, 6)) {
       parts.push('o.search_text LIKE ?');

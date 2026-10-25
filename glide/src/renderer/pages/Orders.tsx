@@ -121,12 +121,6 @@ export function Orders() {
           <option value="review">Needs review</option>
           <option value="unmatched">Unmatched</option>
         </Select>
-        <Select value={String(filter.staleDays ?? '')} onChange={(e) => set({ staleDays: e.target.value ? Number(e.target.value) : undefined })}>
-          <option value="">Any activity</option>
-          <option value="10">No update in 10+ days</option>
-          <option value="20">No update in 20+ days</option>
-          <option value="30">No update in 30+ days</option>
-        </Select>
         <Select value={filter.sort ?? 'placed_desc'} onChange={(e) => set({ sort: e.target.value as OrderFilter['sort'] })}>
           <option value="placed_desc">Newest</option>
           <option value="placed_asc">Oldest</option>

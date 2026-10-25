@@ -243,12 +243,4 @@ describe('acceptance scenarios', () => {
     expect(db.value('SELECT COUNT(*) FROM members')).toBe(1);
   });
 
-  it('Stale filter finds open orders with no update in N days', async () => {
-    const db = memDb();
-    await ingest(db, renderSampleEmail(spec({ orderNumber: '912000000000301', date: new Date(Date.now() - 20 * 86400000) })).raw);
-    await ingest(db, renderSampleEmail(spec({ orderNumber: '912000000000302', date: new Date(Date.now() - 2 * 86400000) })).raw);
-    db.run('UPDATE orders SET last_activity_at = placed_at');
-    const { listOrders } = await import('../../src/core/queries/views');
-    expect(listOrders(db, { staleDays: 10 }).rows.map((r) => r.orderNumber)).toEqual(['912000000000301']);
-  });
 });

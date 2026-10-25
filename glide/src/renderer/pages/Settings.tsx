@@ -344,7 +344,7 @@ function Updates() {
   };
   return (
     <Section title="Updates">
-      <p className="text-sm text-ink3">GLIDE checks GitHub Releases for new versions when it starts and every 6 hours, downloads them in the background and installs them the next time it restarts.</p>
+      <p className="text-sm text-ink3">GLIDE checks GitHub Releases for new versions when it starts and every 6 hours, downloads them in the background, and installs them when you click Restart to update.</p>
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-bg2/40 p-3 text-sm">
         <div>
           <div className="text-ink">Installed version <span className="font-mono">{data?.current ?? '—'}</span></div>
